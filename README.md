@@ -111,7 +111,7 @@ which is what makes the export trustworthy rather than merely pickle-free.
 export UV_PROJECT_ENVIRONMENT=~/.venvs/verifier-guided-search
 uv sync
 
-uv run python tasks.py demo        # the whole thing, offline, ~2 minutes
+uv run python tasks.py demo        # the whole thing, offline, ~90s
 uv run python tasks.py test        # 812 passing, 2 environment-skipped, coverage floor 85%
 uv run python tasks.py bench       # the micro-benchmarks and the evaluation below, ~3 minutes
 uv run python tasks.py calibrate   # why the two difficulty dials are where they are, ~90s
@@ -230,18 +230,20 @@ are reported on would be selecting on the test set.
 
 **100% of 18 attempts blocked** - socket connect, DNS lookup, HTTP fetch, subprocess spawn,
 `ctypes` load, writes and reads and `listdir` and `chdir` outside the jail, renaming and hard-linking
-a file out of the jail, an `os.open` write into the standard library, `/proc` probing, environment
-secret reads, a fork bomb, two thread bombs and a long sleep. 14 were refused by the in-process audit
-guard; the rest by the environment allowlist or the wall-clock watchdog. Each attempt is a program
-whose single test passes *only if the escape succeeded*, so "blocked" means "no attempt returned its
-success marker" and not merely "nothing crashed".
+a file out of the jail, taking an `os.open` write handle on a standard-library file, `/proc` probing,
+environment secret reads, a fork bomb, two thread bombs and a long sleep. 14 were refused by the
+in-process audit guard; the rest by the environment allowlist or the wall-clock watchdog. Each attempt
+is a program whose single test passes *only if the escape succeeded*, so "blocked" means "no attempt
+returned its success marker" and not merely "nothing crashed".
 
-Four of the 18 exist because an adversarial review got out and they now pin the fixes. The guard
-checked only the *first* path argument of an audit event, so the destination of `os.rename`,
+Four of the 18 are there because an adversarial review escaped that way, and they now pin the fixes.
+The guard checked only the *first* path argument of an audit event, so the destination of `os.rename`,
 `os.replace` and `os.link` was never checked and a candidate could move or hard-link a file from its
 jail to any absolute path; and it decided "is this a write?" from the mode string alone, which
-`os.open` does not supply, so `os.open(<stdlib file>, O_WRONLY|O_CREAT)` fell through to the lenient
-*read* check. The fourth is `thread_bomb_via_subclasses`, which is **not** refused by the guard: the
+`os.open` does not supply, so an `os.open` with write flags fell through to the lenient *read* check -
+which accepts the standard library. (That attempt writes no bytes: it opens an existing standard-
+library file for writing and closes it, because holding the descriptor is already the containment
+failure and the suite has to be safe to run on a developer's own interpreter.) The fourth is `thread_bomb_via_subclasses`, which is **not** refused by the guard: the
 import deny-list removes names from `sys.modules` and cannot remove the live `Thread` class that
 `object.__subclasses__()` still reaches. It is in the suite to pin which control does stop it - the
 wall-clock watchdog, and `pids_limit` in the container.
