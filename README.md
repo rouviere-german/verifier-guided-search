@@ -180,9 +180,9 @@ gets going. Two mechanisms explain that, and both are asserted as tests rather t
 **22.2% of tasks** at budget 4 and above, for all four strategies: the search satisfied every visible
 test and the hidden tests then failed. This is the number the two-group benchmark exists to produce.
 Visible solve rates run 16.7-22.2 points above hidden ones at budget 4 and above, and 5.6-11.1 points
-below it - a sentence the report renders from the results file
-([`render_verifier_gap`](src/verifier_guided_search/experiments/report.py)), because the earlier
-hand-written version said "17-27 points" while no row in the file exceeded 22.2.
+below it - a sentence rendered from the results file rather than typed
+([`render_verifier_gap`](src/verifier_guided_search/experiments/report.py)), because a hand-written
+range is exactly the kind of number that drifts away from the table above it.
 
 It does not shrink as the budget grows, and the reason is not that search keeps producing new wrong
 answers. The set of tasks whose visible suite a wrong program can satisfy is fixed and small. Beam,
@@ -328,11 +328,10 @@ Honest limits, in rough order of how much they constrain what the numbers mean.
   artifact - `uv run python bench/bench_calibration.py --check`, `bench/results/calibration.json` -
   and the numbers are in [ADR 0003](docs/adr/0003-mutation-operator-generator.md), not in prose.
 - **0 of the 18 reported tasks start behaviour-preserving**, so no reported solve rate contains a
-  free win. 2 of the 30 tasks in the whole suite do, and both landed in the 12-task trace split. The
-  earlier version of this bullet said "2 of 30", which invited discounting 2/18 = 11.1% from every
-  rate - exactly best-of-N's headline number, and a false conclusion. The classification is
-  script-produced now, on the reported split, and printed in
-  [docs/EXPERIMENTS.md](docs/EXPERIMENTS.md)
+  free win. 2 of the 30 tasks in the whole suite do, and both landed in the 12-task trace split -
+  worth stating that way round, because "2 of 30" invites discounting 11.1% from every rate, which is
+  exactly best-of-N's headline number. The classification is produced by the bench on the reported
+  split and printed in [docs/EXPERIMENTS.md](docs/EXPERIMENTS.md)
   ([`tasks/validate.py`](src/verifier_guided_search/tasks/validate.py),
   [`test_suite_quality.py`](tests/integration/test_suite_quality.py)).
 - **1 of the 18 reported tasks already fools its own visible suite at depth 0.**
