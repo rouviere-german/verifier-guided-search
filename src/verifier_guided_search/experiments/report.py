@@ -19,12 +19,14 @@ from verifier_guided_search.experiments.ablations import AblationResults
 from verifier_guided_search.experiments.sweep import LevelStats, SweepResults
 from verifier_guided_search.experiments.train import TrainedValueModel, feature_importance
 from verifier_guided_search.sandbox.escape import EscapeOutcome, blocked_fraction
+from verifier_guided_search.tasks.validate import SuiteReport, TaskStart
 
 __all__ = [
     "render_ablations",
     "render_escape_suite",
     "render_experiments_document",
     "render_solve_rate_table",
+    "render_start_classification",
     "render_summary_lines",
     "render_value_model_card",
 ]
@@ -58,6 +60,27 @@ def render_solve_rate_table(results: SweepResults) -> str:
                 f"| {_pct(stats.visible_solve_rate)} | {_pct(stats.false_pass_rate)} "
                 f"| {stats.mean_candidates_used:.2f} | {stats.mean_sandbox_seconds:.2f} |"
             )
+    return "\n".join(lines)
+
+
+def render_false_pass_detail(results: SweepResults) -> str:
+    """Which tasks the verifier was fooled on, at the largest budget, per strategy.
+
+    The aggregate rate is flat in the budget. Printing the ids says why: it is the same few tasks
+    whose visible suite a wrong program can satisfy, not a growing pool of new wrong answers.
+    """
+    top = results.config.budget_levels[-1]
+    lines = [
+        f"False passes at budget {top}, by task. A task appears here when the answer the strategy",
+        "committed to passed every visible test and failed a hidden one.",
+        "",
+        "| strategy | false passes | tasks |",
+        "|---|---:|---|",
+    ]
+    for strategy in results.config.strategies:
+        stats = results.level(strategy, top)
+        ids = ", ".join(f"`{item}`" for item in stats.false_pass_task_ids) or "none"
+        lines.append(f"| {strategy} | {stats.false_passes} | {ids} |")
     return "\n".join(lines)
 
 
@@ -147,6 +170,34 @@ def render_escape_suite(outcomes: Sequence[EscapeOutcome]) -> str:
     return "\n".join(lines)
 
 
+def _task_ids(starts: Sequence[TaskStart]) -> str:
+    return ", ".join(f"`{item.task_id}`" for item in starts) or "none"
+
+
+def render_start_classification(report: SuiteReport) -> str:
+    """What the reported tasks' starting programs do, which is what bounds two honesty caveats.
+
+    ``trivial`` tasks are free wins for every strategy, so their share has to be small and stated.
+    ``root_false_pass`` tasks already satisfy their visible suite with a wrong program, so they
+    contribute a false pass to every strategy at every budget with no search at all - which is most
+    of why the false-pass rate does not shrink as the budget grows.
+    """
+    counts = report.as_dict()
+    lines = [
+        "| start of the reported tasks | count | share |",
+        "|---|---:|---:|",
+        f"| broken (the intended case) | {counts['broken']} | {_pct(report.broken_share)} |",
+        f"| already passes the visible suite, fails a hidden test | {counts['root_false_pass']} "
+        f"| {_pct(report.root_false_pass_share)} |",
+        f"| already passes everything (a free win) | {counts['trivial']} "
+        f"| {_pct(report.trivial_share)} |",
+    ]
+    lines.append("")
+    lines.append(f"- free wins: {_task_ids(report.of_kind('trivial'))}")
+    lines.append(f"- root false passes: {_task_ids(report.of_kind('root_false_pass'))}")
+    return "\n".join(lines)
+
+
 def render_summary_lines(results: SweepResults) -> list[str]:
     """The provenance block: seeds, hashes and versions that pin this run."""
     value_model = results.value_model_version or _NA
@@ -174,6 +225,7 @@ def render_experiments_document(
     ablations: AblationResults | None = None,
     trained: TrainedValueModel | None = None,
     escape: Sequence[EscapeOutcome] | None = None,
+    starts: SuiteReport | None = None,
     command: str = "uv run python bench/bench_search.py",
     machine: str = "",
 ) -> str:
@@ -189,6 +241,17 @@ def render_experiments_document(
     ]
     if machine:
         parts.append(f"- machine: {machine}")
+    if starts is not None:
+        parts += [
+            "",
+            "## What the reported tasks start from",
+            "",
+            "Classified by running each start program once "
+            "(`verifier_guided_search.tasks.validate.classify_suite`), on the same split the rates",
+            "below are measured on.",
+            "",
+            render_start_classification(starts),
+        ]
     parts += [
         "",
         "## Hidden-test solve rate against budget",
@@ -198,6 +261,8 @@ def render_experiments_document(
         "(`tests/integration/test_budget_prefix.py`).",
         "",
         render_solve_rate_table(results),
+        "",
+        render_false_pass_detail(results),
         "",
         "## Compute to reach the target solve rate",
         "",

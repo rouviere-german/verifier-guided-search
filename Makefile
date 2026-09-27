@@ -49,6 +49,9 @@ baseline:
 record:
 	$(TASK) record
 
+calibrate:
+	$(TASK) calibrate
+
 check:
 	$(TASK) check
 

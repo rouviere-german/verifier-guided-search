@@ -8,6 +8,7 @@ Targets:
   typecheck     mypy --strict (configured in pyproject.toml)
   test          pytest with coverage (fails under the floor in pyproject.toml)
   bench         micro-benchmarks and the evaluation, both against regression thresholds
+  calibrate     sweep the two benchmark difficulty dials and check the defaults still separate
   experiments   bench + regenerate docs/EXPERIMENTS.md from the run
   escape-suite  the sandbox escape suite on its own
   demo          offline end-to-end demo (no API key, no Docker, no network)
@@ -67,6 +68,12 @@ def bench() -> None:
     """Micro-benchmarks, then the evaluation the README Results section is copied from."""
     _run(PY, "bench/bench_baseline.py", "--check")
     _run(PY, "bench/bench_search.py", "--check")
+
+
+def calibrate() -> None:
+    """Why generator noise and corruption depth are where they are. Not part of ``bench``: it is a
+    provenance check for two constants, not a reported result, and it costs its own ~90 seconds."""
+    _run(PY, "bench/bench_calibration.py", "--check")
 
 
 def demo() -> None:
@@ -137,8 +144,9 @@ def record() -> None:
     if not os.environ.get("ANTHROPIC_API_KEY"):
         raise SystemExit("record needs ANTHROPIC_API_KEY; tests, demo and bench never do.")
     raise SystemExit(
-        "The template has no recording workflow. Repos add bench/record.py that wraps "
-        "AnthropicProvider in RecordingProvider with a BudgetLedger cap."
+        "This repo has no cassette-recording workflow yet: no key was available to record "
+        "against, so none is committed. The live generator itself is reachable with "
+        "'uv run vgs search <task> --generator claude'. See README Non-goals."
     )
 
 
@@ -148,6 +156,7 @@ def check() -> None:
 
 
 TASKS: dict[str, Callable[[], None]] = {
+    "calibrate": calibrate,
     "lint": lint,
     "escape-suite": escape_suite,
     "experiments": experiments,

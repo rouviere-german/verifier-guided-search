@@ -96,7 +96,7 @@ purely for it:
   and inside that split, held out again by task
   (`tests/unit/test_trace.py::test_no_task_appears_on_both_sides_of_the_split`);
 - the share of tasks that are trivially solvable is measured and bounded rather than assumed away
-  (`tests/integration/test_suite_quality.py::test_few_tasks_start_already_correct`), and reported in
+  (`tests/integration/test_suite_quality.py::test_few_reported_tasks_start_already_correct`), and reported in
   the README next to the solve rates.
 
 ## Reporting

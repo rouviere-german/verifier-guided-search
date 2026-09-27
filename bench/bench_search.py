@@ -18,7 +18,11 @@ What it measures, in the order the spec lists it:
 3. verifier false-pass rate (visible pass, hidden fail) per strategy;
 4. value model held-out AUC and ECE, trained on a *disjoint* set of tasks;
 5. ablations over ``c_puct``, ``k`` and value model on/off;
-6. the sandbox escape suite.
+6. the sandbox escape suite;
+7. what the reported tasks *start* from - how many are already correct (a free win for every
+   strategy) and how many already satisfy their visible suite with a wrong program (a false pass at
+   depth 0, for every strategy, at every budget). Both shares are measured on the reported split
+   rather than on some other suite, written into the results JSON, and bounded by thresholds.
 
 Thresholds (``bench/thresholds_search.json``) are floors and ceilings, not exact values: a floor on
 the best strategy's solve rate, a floor on AUC, a ceiling on the false-pass rate, an exact 1.0 on
@@ -69,6 +73,7 @@ from verifier_guided_search.sandbox.escape import (
 )
 from verifier_guided_search.sandbox.local import LocalSandbox
 from verifier_guided_search.tasks.suite import TaskSuite, build_suite
+from verifier_guided_search.tasks.validate import SuiteReport, classify_suite
 
 ROOT = Path(__file__).resolve().parents[1]
 RESULTS = ROOT / "bench" / "results" / "search.json"
@@ -93,6 +98,7 @@ class BenchOutput:
     ablations: AblationResults
     trained: TrainedValueModel
     escapes: tuple[EscapeOutcome, ...]
+    starts: SuiteReport
     wall_seconds: float
 
     def metrics(self) -> dict[str, float]:
@@ -107,6 +113,9 @@ class BenchOutput:
             "value_model_holdout_auc": round(self.trained.metrics.auc, 4),
             "value_model_holdout_ece": round(self.trained.metrics.ece, 4),
             "escape_blocked_fraction": round(blocked_fraction(list(self.escapes)), 4),
+            # Measured on the reported split, so the README's caveats are about these tasks.
+            "eval_trivial_share": round(self.starts.trivial_share, 4),
+            "eval_root_false_pass_share": round(self.starts.root_false_pass_share, 4),
             "wall_seconds": round(self.wall_seconds, 1),
             "sandbox_seconds": round(self.results.total_sandbox_seconds, 1),
             "evaluations": float(self.results.total_evaluations),
@@ -123,6 +132,7 @@ class BenchOutput:
                 "version": self.trained.version,
                 **self.trained.metrics.model_dump(mode="json"),
             },
+            "eval_split_starts": self.starts.as_dict(),
             "escape_suite": [item.as_row() for item in self.escapes],
         }
 
@@ -196,6 +206,10 @@ def run(*, quick: bool, workdir: Path, verbose: bool = True) -> BenchOutput:
     ablation_config = config.model_copy(update={"budget_levels": ABLATION_LEVELS})
     ablations = run_ablations(ablation_suite, ablation_config, deps, budget=ABLATION_LEVELS[-1])
 
+    say("classifying what the reported tasks start from ...")
+    starts = classify_suite(eval_suite, sandbox.execute, timeout_seconds=config.timeout_seconds)
+    say(f"  {starts.render()}")
+
     say("escape suite ...")
     escapes = tuple(evaluate_attempt(sandbox.execute, attempt) for attempt in ESCAPE_SUITE)
 
@@ -204,6 +218,7 @@ def run(*, quick: bool, workdir: Path, verbose: bool = True) -> BenchOutput:
         ablations=ablations,
         trained=trained,
         escapes=escapes,
+        starts=starts,
         wall_seconds=time.perf_counter() - started,
     )
 
@@ -225,18 +240,21 @@ def check_thresholds(metrics: dict[str, float]) -> list[str]:
     return problems
 
 
+def document(output: BenchOutput, command: str) -> str:
+    return render_experiments_document(
+        output.results,
+        ablations=output.ablations,
+        trained=output.trained,
+        escape=list(output.escapes),
+        starts=output.starts,
+        command=command,
+        machine=machine_line(),
+    )
+
+
 def print_tables(output: BenchOutput, command: str) -> None:
     print()
-    print(
-        render_experiments_document(
-            output.results,
-            ablations=output.ablations,
-            trained=output.trained,
-            escape=list(output.escapes),
-            command=command,
-            machine=machine_line(),
-        )
-    )
+    print(document(output, command))
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -259,17 +277,7 @@ def main(argv: list[str] | None = None) -> int:
     print_tables(output, command)
     if args.write_docs:
         EXPERIMENTS.parent.mkdir(parents=True, exist_ok=True)
-        EXPERIMENTS.write_text(
-            render_experiments_document(
-                output.results,
-                ablations=output.ablations,
-                trained=output.trained,
-                escape=list(output.escapes),
-                command=command,
-                machine=machine_line(),
-            ),
-            encoding="utf-8",
-        )
+        EXPERIMENTS.write_text(document(output, command), encoding="utf-8")
         print(f"wrote {EXPERIMENTS.relative_to(ROOT)}")
 
     print()

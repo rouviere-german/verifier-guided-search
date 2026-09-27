@@ -9,8 +9,10 @@ sites applied, flipping a site *off* moves towards the reference and flipping on
 It scores every available flip with a fixed advantage for reverting, adds Gaussian noise, and
 returns the top ``k``. The noise level is the calibration knob: at zero noise the generator is an
 oracle and every strategy solves in ``d`` steps; at large noise it is a uniform sampler and search
-cannot help. ``DEFAULT_NOISE`` was chosen by the sweep in ``bench/bench_calibration.py`` so that the
-strategies separate. Priors come from rank, not from the noisy score.
+cannot help. ``DEFAULT_NOISE`` sits where the strategies separate, which is measured rather than
+asserted: ``bench/bench_calibration.py`` sweeps the noise grid and writes
+``bench/results/calibration.json``, and ``--check`` enforces a floor on the spread between the best
+and worst strategy at this default. Priors come from rank, not from the noisy score.
 
 :class:`ClaudeGenerator` sends the same prompt to the API with structured output, no tools, and
 ``claude-sonnet-5`` for the generator role - candidate generation is the high-volume call in a

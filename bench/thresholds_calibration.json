@@ -1,0 +1,26 @@
+{
+  "spread_at_default": {
+    "min": 0.15
+  },
+  "mean_rate_at_zero_noise": {
+    "min": 0.6
+  },
+  "mean_rate_at_high_noise": {
+    "max": 0.45
+  },
+  "mean_rate_at_depth_1": {
+    "min": 0.6
+  },
+  "spread_at_depth_1": {
+    "max": 0.3
+  },
+  "mean_rate_at_depth_3": {
+    "max": 0.45
+  },
+  "spread_at_depth_3": {
+    "max": 0.3
+  },
+  "wall_seconds": {
+    "max": 600.0
+  }
+}

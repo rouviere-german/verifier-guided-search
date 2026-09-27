@@ -31,15 +31,35 @@ single-site flip with a fixed advantage for reverting an applied site over intro
 Gaussian noise, and returns the top `k`. Priors come from rank, not from the noisy score, so the prior
 does not depend on the scale of whatever the generator scores with.
 
-Two parameters set the regime, and both were chosen by measurement:
+Two parameters set the regime, and both are chosen by measurement. `bench/bench_calibration.py`
+sweeps them and writes `bench/results/calibration.json`; the numbers below are from that file (six
+families, one instance each, all four strategies, budget 16, value model off, so the dial is the only
+thing moving). "Spread" is the best strategy's hidden solve rate minus the worst one's: it is what
+collapses when a dial leaves the informative region, in either direction.
 
-- **noise = 0.55.** At 0 the generator is an oracle; at 50 it is a uniform sampler. Tests pin both ends
-  (`test_zero_noise_makes_the_generator_an_oracle`, `test_large_noise_destroys_the_revert_signal`) and
-  that the default sits strictly between them.
-- **corruption depth = 2.** At depth 1 every strategy solves almost everything within a handful of
-  candidates and the curves are flat at the top; at depth 3 nothing reaches a 60% hidden solve rate
-  within 16 candidates and the curves are flat at the bottom. Depth 2 is the only one of the three in
-  which the strategies separate.
+| noise | greedy | best_of_n | beam | mcts | spread |
+|---:|---:|---:|---:|---:|---:|
+| 0 | 100.0% | 33.3% | 83.3% | 83.3% | 0.667 |
+| 0.25 | 83.3% | 33.3% | 83.3% | 83.3% | 0.500 |
+| **0.55** | 33.3% | 33.3% | 66.7% | 66.7% | **0.333** |
+| 1.5 | 16.7% | 33.3% | 33.3% | 33.3% | 0.167 |
+
+| corruption depth | greedy | best_of_n | beam | mcts | spread |
+|---:|---:|---:|---:|---:|---:|
+| 1 | 66.7% | 83.3% | 83.3% | 83.3% | 0.167 |
+| **2** | 33.3% | 33.3% | 66.7% | 66.7% | **0.333** |
+| 3 | 33.3% | 16.7% | 33.3% | 33.3% | 0.167 |
+
+- **noise = 0.55.** At 0 the generator is an oracle - greedy solves everything, and *greedy beats the
+  searches*, because with a perfect signal backtracking is wasted budget. At 1.5 every strategy is
+  down at 29% on average and indistinguishable. At 0.55 the two search strategies are 33 points
+  above the two baselines. Unit tests pin the two ends as properties of the generator itself
+  (`test_zero_noise_makes_the_generator_an_oracle`,
+  `test_large_noise_destroys_the_revert_signal`) and that the default sits strictly between them.
+- **corruption depth = 2.** At depth 1 best-of-N does as well as the searches (83.3% each): a
+  single-edit bug needs no search. At depth 3 everything sits at 29% on average. Depth 2 is the one
+  of the three where the strategies separate, and `--check` puts a floor on that spread so the choice
+  cannot quietly stop holding.
 
 ## Consequences
 

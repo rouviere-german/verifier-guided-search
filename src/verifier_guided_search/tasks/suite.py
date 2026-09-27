@@ -37,14 +37,14 @@ DEFAULT_SEED: Final = 20260927
 DEFAULT_INSTANCES_PER_FAMILY: Final = 10
 #: Edits applied to each reference solution to produce the starting program.
 #:
-#: This is the benchmark's difficulty dial and it was chosen by measurement, not by taste: at depth
-#: 1
-#: every strategy solves almost everything in a handful of candidates and the curves are flat; at
-#: depth 3 no strategy reaches a 60% hidden solve rate within 16 candidates and the curves are flat
-#: at the bottom. Depth 2 is where the strategies separate, which is the only regime in which the
-#: comparison says anything. It also means a task cannot be repaired by a single edit, so a strategy
-#: that never leaves depth 1 (best-of-N over this edit space) is structurally unable to solve it -
-#: see docs/adr/0003-mutation-operator-generator.md and the README Non-goals.
+#: This is the benchmark's difficulty dial, and the choice is measured rather than asserted:
+#: ``bench/bench_calibration.py`` sweeps depth 1, 2 and 3 and writes
+#: ``bench/results/calibration.json``. At depth 1 every strategy including best-of-N solves most
+#: tasks and the spread between best and worst collapses; at depth 3 every strategy collapses to
+#: the bottom of the range instead. Depth 2 is where the spread is widest, the only regime in which
+#: the comparison says anything. It also means a task cannot be repaired by a single edit, so a
+#: strategy that never leaves depth 1 (best-of-N over this edit space) is structurally unable to
+#: solve it - see docs/adr/0003-mutation-operator-generator.md and the README Non-goals.
 DEFAULT_CORRUPTION_DEPTH: Final = 2
 _MAX_JSON_DEPTH: Final = 8
 

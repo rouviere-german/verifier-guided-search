@@ -19,8 +19,14 @@ that, and both are reported rather than hidden:
 ``broken``
     The starting program fails a visible test. The intended case.
 
-:func:`classify_suite` needs a verifier, so it is called from the bench, the demo and a test - never
-from :func:`~verifier_guided_search.tasks.suite.build_suite`.
+:func:`classify_suite` needs a verifier - one sandbox execution per task - so it is never called
+from :func:`~verifier_guided_search.tasks.suite.build_suite`. Its callers are
+``bench/bench_search.py``, which classifies the **reported** split and writes the counts into
+``bench/results/search.json`` and docs/EXPERIMENTS.md, and
+``tests/integration/test_suite_quality.py``, which enforces :data:`MAX_TRIVIAL_SHARE` on that same
+split. Both of those matter: the bound used to be checked on an unrelated 15-task suite built with a
+different seed, and ``root_false_pass`` - the decomposition that explains why the false-pass rate is
+flat in the budget - was computed and then reported nowhere.
 """
 
 from __future__ import annotations
@@ -45,8 +51,9 @@ __all__ = [
 StartKind = Literal["trivial", "root_false_pass", "broken"]
 ExecuteFn = Callable[[ExecJob], Verdict]
 #: A benchmark where more than this share of tasks starts already correct would be measuring
-#: nothing.
-#: Enforced by ``tests/integration/test_suite_quality.py::test_few_tasks_start_already_correct``.
+#: nothing. Enforced on the reported split by
+#: ``tests/integration/test_suite_quality.py::test_few_reported_tasks_start_already_correct`` and by
+#: ``bench/bench_search.py --check`` through the ``eval_trivial_share`` threshold.
 MAX_TRIVIAL_SHARE: Final = 0.15
 
 
@@ -104,6 +111,7 @@ class SuiteReport:
             "root_false_pass_share": round(self.root_false_pass_share, 4),
             "broken": len(self.of_kind("broken")),
             "trivial_task_ids": [item.task_id for item in self.of_kind("trivial")],
+            "root_false_pass_task_ids": [item.task_id for item in self.of_kind("root_false_pass")],
         }
 
     def render(self) -> str:

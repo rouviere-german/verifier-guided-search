@@ -1,0 +1,124 @@
+{
+  "machine": {
+    "platform": "Windows-10-10.0.19045-SP0",
+    "python": "3.12.14"
+  },
+  "seed": 20260927,
+  "families": 6,
+  "strategies": [
+    "greedy",
+    "best_of_n",
+    "beam",
+    "mcts"
+  ],
+  "budget_levels": [
+    1,
+    2,
+    4,
+    8,
+    16
+  ],
+  "defaults": {
+    "noise": 0.55,
+    "corruption_depth": 2
+  },
+  "noise_sweep": [
+    {
+      "noise": 0.0,
+      "corruption_depth": 2,
+      "hidden_solve_rate": {
+        "greedy": 1.0,
+        "best_of_n": 0.3333,
+        "beam": 0.8333,
+        "mcts": 0.8333
+      },
+      "spread": 0.6667,
+      "mean_hidden_solve_rate": 0.75
+    },
+    {
+      "noise": 0.25,
+      "corruption_depth": 2,
+      "hidden_solve_rate": {
+        "greedy": 0.8333,
+        "best_of_n": 0.3333,
+        "beam": 0.8333,
+        "mcts": 0.8333
+      },
+      "spread": 0.5,
+      "mean_hidden_solve_rate": 0.7083
+    },
+    {
+      "noise": 0.55,
+      "corruption_depth": 2,
+      "hidden_solve_rate": {
+        "greedy": 0.3333,
+        "best_of_n": 0.3333,
+        "beam": 0.6667,
+        "mcts": 0.6667
+      },
+      "spread": 0.3333,
+      "mean_hidden_solve_rate": 0.5
+    },
+    {
+      "noise": 1.5,
+      "corruption_depth": 2,
+      "hidden_solve_rate": {
+        "greedy": 0.1667,
+        "best_of_n": 0.3333,
+        "beam": 0.3333,
+        "mcts": 0.3333
+      },
+      "spread": 0.1667,
+      "mean_hidden_solve_rate": 0.2917
+    }
+  ],
+  "depth_sweep": [
+    {
+      "noise": 0.55,
+      "corruption_depth": 1,
+      "hidden_solve_rate": {
+        "greedy": 0.6667,
+        "best_of_n": 0.8333,
+        "beam": 0.8333,
+        "mcts": 0.8333
+      },
+      "spread": 0.1667,
+      "mean_hidden_solve_rate": 0.7917
+    },
+    {
+      "noise": 0.55,
+      "corruption_depth": 2,
+      "hidden_solve_rate": {
+        "greedy": 0.3333,
+        "best_of_n": 0.3333,
+        "beam": 0.6667,
+        "mcts": 0.6667
+      },
+      "spread": 0.3333,
+      "mean_hidden_solve_rate": 0.5
+    },
+    {
+      "noise": 0.55,
+      "corruption_depth": 3,
+      "hidden_solve_rate": {
+        "greedy": 0.3333,
+        "best_of_n": 0.1667,
+        "beam": 0.3333,
+        "mcts": 0.3333
+      },
+      "spread": 0.1667,
+      "mean_hidden_solve_rate": 0.2917
+    }
+  ],
+  "metrics": {
+    "spread_at_default": 0.3333,
+    "spread_at_zero_noise": 0.6667,
+    "mean_rate_at_zero_noise": 0.75,
+    "mean_rate_at_high_noise": 0.2917,
+    "mean_rate_at_depth_1": 0.7917,
+    "mean_rate_at_depth_3": 0.2917,
+    "spread_at_depth_1": 0.1667,
+    "spread_at_depth_3": 0.1667,
+    "wall_seconds": 86.6
+  }
+}

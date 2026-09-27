@@ -113,7 +113,8 @@ uv sync
 
 uv run python tasks.py demo        # the whole thing, offline, ~90s
 uv run python tasks.py test        # 755 tests, coverage floor 85%
-uv run python tasks.py bench       # the evaluation below, ~2.5 minutes
+uv run python tasks.py bench       # the evaluation below, ~4 minutes
+uv run python bench/bench_calibration.py --check   # why the two difficulty dials are where they are
 uv run python tasks.py lint typecheck audit baseline
 ```
 
@@ -293,9 +294,10 @@ Honest limits, in rough order of how much they constrain what the numbers mean.
   repair a two-edit bug. Real best-of-N samples whole programs. The result in the table is correct
   for the edit-space framing the spec sets out and should not be read as a general finding.
 - **Benchmark difficulty is a dial that was chosen by measurement.** Corruption depth 2 is where the
-  strategies separate; depth 1 makes everything trivial and depth 3 flattens everything at the
-  bottom. That choice is documented in
-  [ADR 0003](docs/adr/0003-mutation-operator-generator.md) rather than buried.
+  strategies separate; at depth 1 best-of-N matches the searches and at depth 3 everything flattens
+  at the bottom. Same for the generator's noise level. Both sweeps are a script with a committed
+  artifact - `uv run python bench/bench_calibration.py --check`, `bench/results/calibration.json` -
+  and the numbers are in [ADR 0003](docs/adr/0003-mutation-operator-generator.md), not in prose.
 - **2 of 30 start programs are behaviour-preserving**, so every strategy solves them for free. The
   share is measured and bounded rather than assumed away
   ([`tasks/validate.py`](src/verifier_guided_search/tasks/validate.py),

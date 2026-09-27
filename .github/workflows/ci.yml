@@ -114,6 +114,8 @@ jobs:
         run: uv run python bench/bench_baseline.py --check
       - name: evaluation (solve rates, false-pass rate, value model, escape suite)
         run: uv run python bench/bench_search.py --check
+      - name: calibration (the two difficulty dials still separate the strategies)
+        run: uv run python bench/bench_calibration.py --check
       - uses: actions/upload-artifact@v4
         if: always()
         with:

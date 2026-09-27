@@ -33,7 +33,10 @@ on the *hidden* tests, which no strategy ever saw. Three numbers come out of tha
     Share where the verifier was satisfied. Always at least the hidden rate.
 ``false_pass_rate``
     Share where the verifier was satisfied and the hidden tests were not: the cost of trusting a
-    partial test suite, and the reason the benchmark keeps two groups.
+    partial test suite, and the reason the benchmark keeps two groups. The *task ids* are reported
+    alongside it (``false_pass_task_ids``), because the rate alone invites the reading that more
+    search keeps producing new wrong answers, while the ids show a fixed, small set of tasks whose
+    visible suite is satisfiable by a wrong program - one of them at depth 0, before any search.
 
 Confidence intervals are percentile bootstrap over *tasks* (1000 resamples by default), because two
 evaluations of the same task are not independent observations.
@@ -208,6 +211,10 @@ class LevelStats(BaseModel):
     mean_candidates_used: float = Field(ge=0)
     mean_sandbox_seconds: float = Field(ge=0)
     mean_generator_tokens: float = Field(ge=0)
+    #: Which tasks the verifier was fooled on. Reported because the aggregate rate on its own reads
+    #: as "search keeps finding new wrong answers", and the ids show it is the same small set of
+    #: tasks whose visible suite a wrong program can satisfy.
+    false_pass_task_ids: tuple[str, ...] = ()
 
     @property
     def label(self) -> str:
@@ -295,6 +302,7 @@ def aggregate(
         mean_candidates_used=_mean(used),
         mean_sandbox_seconds=_mean(seconds),
         mean_generator_tokens=_mean(tokens),
+        false_pass_task_ids=tuple(task_id for task_id, flag in false_units if flag),
     )
 
 
