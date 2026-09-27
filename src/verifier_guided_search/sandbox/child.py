@@ -62,6 +62,14 @@ EXIT_TIMEOUT = 3
 #: itself needs ``threading`` for its watchdog, so :func:`purge_denied_modules` drops every denied
 #: name from ``sys.modules`` just before the guard goes up; the already-running timer keeps working
 #: because it holds its own references, and a later import of the same name fires the event.
+#:
+#: **The limit of this control**: dropping a name from ``sys.modules`` does not destroy the module's
+#: live objects, and anything the harness itself imported stays reachable without an ``import``.
+#: ``threading.Thread`` is a direct subclass of ``object``, so ``object.__subclasses__()`` finds it
+#: and ``Thread.__init__.__globals__["_start_new_thread"]`` starts a thread with no audit event
+#: raised anywhere. The deny-list is a cheap filter on the obvious route, not a capability boundary;
+#: what actually bounds a thread bomb is the wall-clock watchdog here and ``pids_limit`` in the
+#: container. ``sandbox/escape.py::thread_bomb_via_subclasses`` keeps that honest by attempting it.
 DENIED_MODULES = frozenset(
     {
         "_multiprocessing",
