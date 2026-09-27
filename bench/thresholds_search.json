@@ -1,0 +1,10 @@
+{
+  "escape_blocked_fraction": {"min": 1.0, "max": 1.0},
+  "best_strategy_hidden_solve_rate": {"min": 0.30},
+  "mcts_hidden_solve_rate": {"min": 0.25},
+  "max_false_pass_rate": {"max": 0.60},
+  "value_model_holdout_auc": {"min": 0.70},
+  "value_model_holdout_ece": {"max": 0.45},
+  "cache_hit_ratio": {"min": 0.20},
+  "wall_seconds": {"max": 1500.0}
+}

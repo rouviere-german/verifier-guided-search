@@ -1,0 +1,725 @@
+{
+  "machine": {
+    "platform": "Windows-10-10.0.19045-SP0",
+    "python": "3.12.14",
+    "cpu_count": 6,
+    "processor": "Intel64 Family 6 Model 158 Stepping 10, GenuineIntel"
+  },
+  "metrics": {
+    "best_strategy_hidden_solve_rate": 0.7222,
+    "mcts_hidden_solve_rate": 0.6111,
+    "max_false_pass_rate": 0.2222,
+    "value_model_holdout_auc": 0.9524,
+    "value_model_holdout_ece": 0.0805,
+    "escape_blocked_fraction": 1.0,
+    "wall_seconds": 146.9,
+    "sandbox_seconds": 234.6,
+    "evaluations": 630.0,
+    "cache_hit_ratio": 0.572
+  },
+  "sweep": {
+    "schema_version": 1,
+    "config": {
+      "seed": 20260927,
+      "instances_per_family": 2,
+      "strategies": [
+        "greedy",
+        "best_of_n",
+        "beam",
+        "mcts"
+      ],
+      "budget_levels": [
+        1,
+        2,
+        4,
+        8,
+        16
+      ],
+      "children_per_expansion": 4,
+      "beam_width": 3,
+      "c_puct": 1.4,
+      "use_value_model": true,
+      "generator_noise": 0.55,
+      "generator_seed": 7,
+      "timeout_seconds": 1.5,
+      "bootstrap_resamples": 1000,
+      "target_solve_rate": 0.6
+    },
+    "suite_sha256": "da315e45133c8a30811338b9f5bfecd09318f85457e08912860fef369dadafd4",
+    "task_count": 18,
+    "family_count": 11,
+    "generator": "mutation",
+    "generator_model": "fake-mutation",
+    "value_model_version": "47a4225a88a7d27004bb95e6a0e8228733f49e2a84a548600a059a55f1e829ba",
+    "levels": [
+      {
+        "strategy": "greedy",
+        "candidates_budget": 1,
+        "tasks": 18,
+        "hidden_solved": 0,
+        "visible_solved": 1,
+        "false_passes": 1,
+        "hidden_solve_rate": 0.0,
+        "hidden_ci_low": 0.0,
+        "hidden_ci_high": 0.0,
+        "visible_solve_rate": 0.05555555555555555,
+        "false_pass_rate": 0.05555555555555555,
+        "mean_candidates_used": 1.0,
+        "mean_sandbox_seconds": 0.29646633333333333,
+        "mean_generator_tokens": 551.8888888888889
+      },
+      {
+        "strategy": "greedy",
+        "candidates_budget": 2,
+        "tasks": 18,
+        "hidden_solved": 0,
+        "visible_solved": 2,
+        "false_passes": 2,
+        "hidden_solve_rate": 0.0,
+        "hidden_ci_low": 0.0,
+        "hidden_ci_high": 0.0,
+        "visible_solve_rate": 0.1111111111111111,
+        "false_pass_rate": 0.1111111111111111,
+        "mean_candidates_used": 1.9444444444444444,
+        "mean_sandbox_seconds": 0.6704548888888888,
+        "mean_generator_tokens": 1103.7222222222222
+      },
+      {
+        "strategy": "greedy",
+        "candidates_budget": 4,
+        "tasks": 18,
+        "hidden_solved": 4,
+        "visible_solved": 8,
+        "false_passes": 4,
+        "hidden_solve_rate": 0.2222222222222222,
+        "hidden_ci_low": 0.05555555555555555,
+        "hidden_ci_high": 0.3888888888888889,
+        "visible_solve_rate": 0.4444444444444444,
+        "false_pass_rate": 0.2222222222222222,
+        "mean_candidates_used": 3.5,
+        "mean_sandbox_seconds": 1.2058824444444445,
+        "mean_generator_tokens": 2053.3888888888887
+      },
+      {
+        "strategy": "greedy",
+        "candidates_budget": 8,
+        "tasks": 18,
+        "hidden_solved": 6,
+        "visible_solved": 10,
+        "false_passes": 4,
+        "hidden_solve_rate": 0.3333333333333333,
+        "hidden_ci_low": 0.1111111111111111,
+        "hidden_ci_high": 0.5555555555555556,
+        "visible_solve_rate": 0.5555555555555556,
+        "false_pass_rate": 0.2222222222222222,
+        "mean_candidates_used": 5.5,
+        "mean_sandbox_seconds": 2.0523765,
+        "mean_generator_tokens": 3381.1666666666665
+      },
+      {
+        "strategy": "greedy",
+        "candidates_budget": 16,
+        "tasks": 18,
+        "hidden_solved": 6,
+        "visible_solved": 10,
+        "false_passes": 4,
+        "hidden_solve_rate": 0.3333333333333333,
+        "hidden_ci_low": 0.1111111111111111,
+        "hidden_ci_high": 0.5555555555555556,
+        "visible_solve_rate": 0.5555555555555556,
+        "false_pass_rate": 0.2222222222222222,
+        "mean_candidates_used": 9.055555555555555,
+        "mean_sandbox_seconds": 3.514822388888889,
+        "mean_generator_tokens": 5813.5
+      },
+      {
+        "strategy": "best_of_n",
+        "candidates_budget": 1,
+        "tasks": 18,
+        "hidden_solved": 0,
+        "visible_solved": 1,
+        "false_passes": 1,
+        "hidden_solve_rate": 0.0,
+        "hidden_ci_low": 0.0,
+        "hidden_ci_high": 0.0,
+        "visible_solve_rate": 0.05555555555555555,
+        "false_pass_rate": 0.05555555555555555,
+        "mean_candidates_used": 1.0,
+        "mean_sandbox_seconds": 0.29646633333333333,
+        "mean_generator_tokens": 264.94444444444446
+      },
+      {
+        "strategy": "best_of_n",
+        "candidates_budget": 2,
+        "tasks": 18,
+        "hidden_solved": 0,
+        "visible_solved": 2,
+        "false_passes": 2,
+        "hidden_solve_rate": 0.0,
+        "hidden_ci_low": 0.0,
+        "hidden_ci_high": 0.0,
+        "visible_solve_rate": 0.1111111111111111,
+        "false_pass_rate": 0.1111111111111111,
+        "mean_candidates_used": 1.9444444444444444,
+        "mean_sandbox_seconds": 0.6704548888888888,
+        "mean_generator_tokens": 529.8888888888889
+      },
+      {
+        "strategy": "best_of_n",
+        "candidates_budget": 4,
+        "tasks": 18,
+        "hidden_solved": 1,
+        "visible_solved": 5,
+        "false_passes": 4,
+        "hidden_solve_rate": 0.05555555555555555,
+        "hidden_ci_low": 0.0,
+        "hidden_ci_high": 0.16666666666666666,
+        "visible_solve_rate": 0.2777777777777778,
+        "false_pass_rate": 0.2222222222222222,
+        "mean_candidates_used": 3.6666666666666665,
+        "mean_sandbox_seconds": 1.2405048333333335,
+        "mean_generator_tokens": 974.2222222222222
+      },
+      {
+        "strategy": "best_of_n",
+        "candidates_budget": 8,
+        "tasks": 18,
+        "hidden_solved": 2,
+        "visible_solved": 5,
+        "false_passes": 4,
+        "hidden_solve_rate": 0.1111111111111111,
+        "hidden_ci_low": 0.0,
+        "hidden_ci_high": 0.2777777777777778,
+        "visible_solve_rate": 0.2777777777777778,
+        "false_pass_rate": 0.2222222222222222,
+        "mean_candidates_used": 6.555555555555555,
+        "mean_sandbox_seconds": 2.221987722222222,
+        "mean_generator_tokens": 1732.611111111111
+      },
+      {
+        "strategy": "best_of_n",
+        "candidates_budget": 16,
+        "tasks": 18,
+        "hidden_solved": 2,
+        "visible_solved": 5,
+        "false_passes": 4,
+        "hidden_solve_rate": 0.1111111111111111,
+        "hidden_ci_low": 0.0,
+        "hidden_ci_high": 0.2777777777777778,
+        "visible_solve_rate": 0.2777777777777778,
+        "false_pass_rate": 0.2222222222222222,
+        "mean_candidates_used": 10.222222222222221,
+        "mean_sandbox_seconds": 3.5630329999999995,
+        "mean_generator_tokens": 2691.5555555555557
+      },
+      {
+        "strategy": "beam",
+        "candidates_budget": 1,
+        "tasks": 18,
+        "hidden_solved": 0,
+        "visible_solved": 1,
+        "false_passes": 1,
+        "hidden_solve_rate": 0.0,
+        "hidden_ci_low": 0.0,
+        "hidden_ci_high": 0.0,
+        "visible_solve_rate": 0.05555555555555555,
+        "false_pass_rate": 0.05555555555555555,
+        "mean_candidates_used": 1.0,
+        "mean_sandbox_seconds": 0.29646633333333333,
+        "mean_generator_tokens": 266.6666666666667
+      },
+      {
+        "strategy": "beam",
+        "candidates_budget": 2,
+        "tasks": 18,
+        "hidden_solved": 0,
+        "visible_solved": 2,
+        "false_passes": 2,
+        "hidden_solve_rate": 0.0,
+        "hidden_ci_low": 0.0,
+        "hidden_ci_high": 0.0,
+        "visible_solve_rate": 0.1111111111111111,
+        "false_pass_rate": 0.1111111111111111,
+        "mean_candidates_used": 1.9444444444444444,
+        "mean_sandbox_seconds": 0.6704548888888888,
+        "mean_generator_tokens": 533.2222222222222
+      },
+      {
+        "strategy": "beam",
+        "candidates_budget": 4,
+        "tasks": 18,
+        "hidden_solved": 1,
+        "visible_solved": 5,
+        "false_passes": 4,
+        "hidden_solve_rate": 0.05555555555555555,
+        "hidden_ci_low": 0.0,
+        "hidden_ci_high": 0.16666666666666666,
+        "visible_solve_rate": 0.2777777777777778,
+        "false_pass_rate": 0.2222222222222222,
+        "mean_candidates_used": 3.6666666666666665,
+        "mean_sandbox_seconds": 1.2405048333333335,
+        "mean_generator_tokens": 980.8888888888889
+      },
+      {
+        "strategy": "beam",
+        "candidates_budget": 8,
+        "tasks": 18,
+        "hidden_solved": 8,
+        "visible_solved": 12,
+        "false_passes": 4,
+        "hidden_solve_rate": 0.4444444444444444,
+        "hidden_ci_low": 0.2222222222222222,
+        "hidden_ci_high": 0.6666666666666666,
+        "visible_solve_rate": 0.6666666666666666,
+        "false_pass_rate": 0.2222222222222222,
+        "mean_candidates_used": 6.055555555555555,
+        "mean_sandbox_seconds": 2.1498579444444443,
+        "mean_generator_tokens": 1585.388888888889
+      },
+      {
+        "strategy": "beam",
+        "candidates_budget": 16,
+        "tasks": 18,
+        "hidden_solved": 13,
+        "visible_solved": 16,
+        "false_passes": 4,
+        "hidden_solve_rate": 0.7222222222222222,
+        "hidden_ci_low": 0.5,
+        "hidden_ci_high": 0.8888888888888888,
+        "visible_solve_rate": 0.8888888888888888,
+        "false_pass_rate": 0.2222222222222222,
+        "mean_candidates_used": 7.277777777777778,
+        "mean_sandbox_seconds": 2.5607136666666666,
+        "mean_generator_tokens": 1907.7777777777778
+      },
+      {
+        "strategy": "mcts",
+        "candidates_budget": 1,
+        "tasks": 18,
+        "hidden_solved": 0,
+        "visible_solved": 1,
+        "false_passes": 1,
+        "hidden_solve_rate": 0.0,
+        "hidden_ci_low": 0.0,
+        "hidden_ci_high": 0.0,
+        "visible_solve_rate": 0.05555555555555555,
+        "false_pass_rate": 0.05555555555555555,
+        "mean_candidates_used": 1.0,
+        "mean_sandbox_seconds": 0.29646633333333333,
+        "mean_generator_tokens": 315.0
+      },
+      {
+        "strategy": "mcts",
+        "candidates_budget": 2,
+        "tasks": 18,
+        "hidden_solved": 0,
+        "visible_solved": 2,
+        "false_passes": 2,
+        "hidden_solve_rate": 0.0,
+        "hidden_ci_low": 0.0,
+        "hidden_ci_high": 0.0,
+        "visible_solve_rate": 0.1111111111111111,
+        "false_pass_rate": 0.1111111111111111,
+        "mean_candidates_used": 1.9444444444444444,
+        "mean_sandbox_seconds": 0.6704548888888888,
+        "mean_generator_tokens": 629.8333333333334
+      },
+      {
+        "strategy": "mcts",
+        "candidates_budget": 4,
+        "tasks": 18,
+        "hidden_solved": 1,
+        "visible_solved": 5,
+        "false_passes": 4,
+        "hidden_solve_rate": 0.05555555555555555,
+        "hidden_ci_low": 0.0,
+        "hidden_ci_high": 0.16666666666666666,
+        "visible_solve_rate": 0.2777777777777778,
+        "false_pass_rate": 0.2222222222222222,
+        "mean_candidates_used": 3.6666666666666665,
+        "mean_sandbox_seconds": 1.2405048333333335,
+        "mean_generator_tokens": 1174.0
+      },
+      {
+        "strategy": "mcts",
+        "candidates_budget": 8,
+        "tasks": 18,
+        "hidden_solved": 5,
+        "visible_solved": 9,
+        "false_passes": 4,
+        "hidden_solve_rate": 0.2777777777777778,
+        "hidden_ci_low": 0.05555555555555555,
+        "hidden_ci_high": 0.5,
+        "visible_solve_rate": 0.5,
+        "false_pass_rate": 0.2222222222222222,
+        "mean_candidates_used": 6.166666666666667,
+        "mean_sandbox_seconds": 2.4214722222222225,
+        "mean_generator_tokens": 1995.7777777777778
+      },
+      {
+        "strategy": "mcts",
+        "candidates_budget": 16,
+        "tasks": 18,
+        "hidden_solved": 11,
+        "visible_solved": 14,
+        "false_passes": 4,
+        "hidden_solve_rate": 0.6111111111111112,
+        "hidden_ci_low": 0.3888888888888889,
+        "hidden_ci_high": 0.8333333333333334,
+        "visible_solve_rate": 0.7777777777777778,
+        "false_pass_rate": 0.2222222222222222,
+        "mean_candidates_used": 8.444444444444445,
+        "mean_sandbox_seconds": 3.3934281111111115,
+        "mean_generator_tokens": 2788.8888888888887
+      }
+    ],
+    "compute_to_target": {
+      "greedy": null,
+      "best_of_n": null,
+      "beam": 16,
+      "mcts": 16
+    },
+    "total_evaluations": 630,
+    "total_sandbox_seconds": 234.576,
+    "wall_seconds": 98.081,
+    "cache_hit_ratio": 0.572
+  },
+  "ablations": {
+    "schema_version": 1,
+    "strategy": "mcts",
+    "suite_sha256": "0493107402ef4b133d7484ba44bec59f140520d68988056499e7085fb55ecf06",
+    "task_count": 11,
+    "candidates_budget": 8,
+    "value_model_version": "47a4225a88a7d27004bb95e6a0e8228733f49e2a84a548600a059a55f1e829ba",
+    "rows": [
+      {
+        "knob": "c_puct",
+        "value": "0",
+        "stats": {
+          "strategy": "mcts",
+          "candidates_budget": 8,
+          "tasks": 11,
+          "hidden_solved": 5,
+          "visible_solved": 7,
+          "false_passes": 2,
+          "hidden_solve_rate": 0.45454545454545453,
+          "hidden_ci_low": 0.18181818181818182,
+          "hidden_ci_high": 0.7272727272727273,
+          "visible_solve_rate": 0.6363636363636364,
+          "false_pass_rate": 0.18181818181818182,
+          "mean_candidates_used": 6.181818181818182,
+          "mean_sandbox_seconds": 2.620181818181818,
+          "mean_generator_tokens": 1682.1818181818182
+        }
+      },
+      {
+        "knob": "c_puct",
+        "value": "0.7",
+        "stats": {
+          "strategy": "mcts",
+          "candidates_budget": 8,
+          "tasks": 11,
+          "hidden_solved": 3,
+          "visible_solved": 5,
+          "false_passes": 2,
+          "hidden_solve_rate": 0.2727272727272727,
+          "hidden_ci_low": 0.0,
+          "hidden_ci_high": 0.5454545454545454,
+          "visible_solve_rate": 0.45454545454545453,
+          "false_pass_rate": 0.18181818181818182,
+          "mean_candidates_used": 6.2727272727272725,
+          "mean_sandbox_seconds": 2.9101707272727277,
+          "mean_generator_tokens": 2101.818181818182
+        }
+      },
+      {
+        "knob": "c_puct",
+        "value": "1.4",
+        "stats": {
+          "strategy": "mcts",
+          "candidates_budget": 8,
+          "tasks": 11,
+          "hidden_solved": 3,
+          "visible_solved": 5,
+          "false_passes": 2,
+          "hidden_solve_rate": 0.2727272727272727,
+          "hidden_ci_low": 0.0,
+          "hidden_ci_high": 0.5454545454545454,
+          "visible_solve_rate": 0.45454545454545453,
+          "false_pass_rate": 0.18181818181818182,
+          "mean_candidates_used": 6.2727272727272725,
+          "mean_sandbox_seconds": 2.9101707272727277,
+          "mean_generator_tokens": 2101.818181818182
+        }
+      },
+      {
+        "knob": "c_puct",
+        "value": "2.8",
+        "stats": {
+          "strategy": "mcts",
+          "candidates_budget": 8,
+          "tasks": 11,
+          "hidden_solved": 3,
+          "visible_solved": 5,
+          "false_passes": 2,
+          "hidden_solve_rate": 0.2727272727272727,
+          "hidden_ci_low": 0.0,
+          "hidden_ci_high": 0.5454545454545454,
+          "visible_solve_rate": 0.45454545454545453,
+          "false_pass_rate": 0.18181818181818182,
+          "mean_candidates_used": 6.2727272727272725,
+          "mean_sandbox_seconds": 2.9080351818181818,
+          "mean_generator_tokens": 2293.181818181818
+        }
+      },
+      {
+        "knob": "children_per_expansion",
+        "value": "2",
+        "stats": {
+          "strategy": "mcts",
+          "candidates_budget": 8,
+          "tasks": 11,
+          "hidden_solved": 3,
+          "visible_solved": 6,
+          "false_passes": 3,
+          "hidden_solve_rate": 0.2727272727272727,
+          "hidden_ci_low": 0.09090909090909091,
+          "hidden_ci_high": 0.5454545454545454,
+          "visible_solve_rate": 0.5454545454545454,
+          "false_pass_rate": 0.2727272727272727,
+          "mean_candidates_used": 6.0,
+          "mean_sandbox_seconds": 2.8557674545454543,
+          "mean_generator_tokens": 2387.2727272727275
+        }
+      },
+      {
+        "knob": "children_per_expansion",
+        "value": "4",
+        "stats": {
+          "strategy": "mcts",
+          "candidates_budget": 8,
+          "tasks": 11,
+          "hidden_solved": 3,
+          "visible_solved": 5,
+          "false_passes": 2,
+          "hidden_solve_rate": 0.2727272727272727,
+          "hidden_ci_low": 0.0,
+          "hidden_ci_high": 0.5454545454545454,
+          "visible_solve_rate": 0.45454545454545453,
+          "false_pass_rate": 0.18181818181818182,
+          "mean_candidates_used": 6.2727272727272725,
+          "mean_sandbox_seconds": 2.9101707272727277,
+          "mean_generator_tokens": 2101.818181818182
+        }
+      },
+      {
+        "knob": "children_per_expansion",
+        "value": "8",
+        "stats": {
+          "strategy": "mcts",
+          "candidates_budget": 8,
+          "tasks": 11,
+          "hidden_solved": 1,
+          "visible_solved": 3,
+          "false_passes": 2,
+          "hidden_solve_rate": 0.09090909090909091,
+          "hidden_ci_low": 0.0,
+          "hidden_ci_high": 0.2727272727272727,
+          "visible_solve_rate": 0.2727272727272727,
+          "false_pass_rate": 0.18181818181818182,
+          "mean_candidates_used": 6.636363636363637,
+          "mean_sandbox_seconds": 2.962105909090909,
+          "mean_generator_tokens": 1344.3636363636363
+        }
+      },
+      {
+        "knob": "use_value_model",
+        "value": "on",
+        "stats": {
+          "strategy": "mcts",
+          "candidates_budget": 8,
+          "tasks": 11,
+          "hidden_solved": 3,
+          "visible_solved": 5,
+          "false_passes": 2,
+          "hidden_solve_rate": 0.2727272727272727,
+          "hidden_ci_low": 0.0,
+          "hidden_ci_high": 0.5454545454545454,
+          "visible_solve_rate": 0.45454545454545453,
+          "false_pass_rate": 0.18181818181818182,
+          "mean_candidates_used": 6.2727272727272725,
+          "mean_sandbox_seconds": 2.9101707272727277,
+          "mean_generator_tokens": 2101.818181818182
+        }
+      },
+      {
+        "knob": "use_value_model",
+        "value": "off",
+        "stats": {
+          "strategy": "mcts",
+          "candidates_budget": 8,
+          "tasks": 11,
+          "hidden_solved": 3,
+          "visible_solved": 5,
+          "false_passes": 2,
+          "hidden_solve_rate": 0.2727272727272727,
+          "hidden_ci_low": 0.0,
+          "hidden_ci_high": 0.5454545454545454,
+          "visible_solve_rate": 0.45454545454545453,
+          "false_pass_rate": 0.18181818181818182,
+          "mean_candidates_used": 6.2727272727272725,
+          "mean_sandbox_seconds": 2.9074930909090906,
+          "mean_generator_tokens": 2201.5454545454545
+        }
+      }
+    ]
+  },
+  "value_model": {
+    "version": "47a4225a88a7d27004bb95e6a0e8228733f49e2a84a548600a059a55f1e829ba",
+    "auc": 0.9523809523809523,
+    "ece": 0.08050762796738524,
+    "brier": 0.07879924000783389,
+    "train_rows": 57,
+    "holdout_rows": 24,
+    "train_tasks": 8,
+    "holdout_tasks": 4,
+    "train_positive_rate": 0.10526315789473684,
+    "holdout_positive_rate": 0.125
+  },
+  "escape_suite": [
+    {
+      "attempt": "socket_connect",
+      "category": "network",
+      "mechanism": "audit_hook",
+      "status": "blocked",
+      "blocked": true,
+      "violations": [
+        "import:socket"
+      ]
+    },
+    {
+      "attempt": "dns_lookup",
+      "category": "network",
+      "mechanism": "audit_hook",
+      "status": "blocked",
+      "blocked": true,
+      "violations": [
+        "import:socket"
+      ]
+    },
+    {
+      "attempt": "http_fetch",
+      "category": "network",
+      "mechanism": "audit_hook",
+      "status": "blocked",
+      "blocked": true,
+      "violations": [
+        "import:urllib"
+      ]
+    },
+    {
+      "attempt": "subprocess_spawn",
+      "category": "process",
+      "mechanism": "audit_hook",
+      "status": "blocked",
+      "blocked": true,
+      "violations": [
+        "import:subprocess"
+      ]
+    },
+    {
+      "attempt": "ctypes_native_call",
+      "category": "process",
+      "mechanism": "audit_hook",
+      "status": "blocked",
+      "blocked": true,
+      "violations": [
+        "import:ctypes"
+      ]
+    },
+    {
+      "attempt": "write_outside_jail",
+      "category": "filesystem",
+      "mechanism": "audit_hook",
+      "status": "blocked",
+      "blocked": true,
+      "violations": [
+        "open:write"
+      ]
+    },
+    {
+      "attempt": "read_outside_jail",
+      "category": "filesystem",
+      "mechanism": "audit_hook",
+      "status": "blocked",
+      "blocked": true,
+      "violations": [
+        "open:read"
+      ]
+    },
+    {
+      "attempt": "listdir_outside_jail",
+      "category": "filesystem",
+      "mechanism": "audit_hook",
+      "status": "blocked",
+      "blocked": true,
+      "violations": [
+        "os.listdir"
+      ]
+    },
+    {
+      "attempt": "chdir_outside_jail",
+      "category": "filesystem",
+      "mechanism": "audit_hook",
+      "status": "blocked",
+      "blocked": true,
+      "violations": [
+        "os.chdir"
+      ]
+    },
+    {
+      "attempt": "env_secret_read",
+      "category": "secrets",
+      "mechanism": "environment",
+      "status": "ok",
+      "blocked": true,
+      "violations": []
+    },
+    {
+      "attempt": "proc_environ_probe",
+      "category": "secrets",
+      "mechanism": "audit_hook",
+      "status": "blocked",
+      "blocked": true,
+      "violations": [
+        "open:read"
+      ]
+    },
+    {
+      "attempt": "fork_bomb",
+      "category": "resources",
+      "mechanism": "platform",
+      "status": "ok",
+      "blocked": true,
+      "violations": []
+    },
+    {
+      "attempt": "thread_bomb",
+      "category": "resources",
+      "mechanism": "audit_hook",
+      "status": "blocked",
+      "blocked": true,
+      "violations": [
+        "import:threading"
+      ]
+    },
+    {
+      "attempt": "long_sleep",
+      "category": "resources",
+      "mechanism": "platform",
+      "status": "timeout",
+      "blocked": true,
+      "violations": []
+    }
+  ]
+}
