@@ -14,6 +14,7 @@ from __future__ import annotations
 import pytest
 
 from verifier_guided_search.experiments.ablations import (
+    C_PUCT_OFF_KNOB,
     DEFAULT_C_PUCT_GRID,
     DEFAULT_K_GRID,
     aggregate_at,
@@ -55,12 +56,31 @@ def ablations(tiny_suite: TaskSuite, shared_sandbox: CachingSandbox) -> object:
 def test_every_knob_in_the_spec_is_swept(ablations: object) -> None:
     assert ablations.knobs == (  # type: ignore[attr-defined]
         "c_puct",
+        C_PUCT_OFF_KNOB,
         "children_per_expansion",
         "use_value_model",
     )
     assert len(ablations.by_knob("c_puct")) == 2  # type: ignore[attr-defined]
+    assert len(ablations.by_knob(C_PUCT_OFF_KNOB)) == 2  # type: ignore[attr-defined]
     assert len(ablations.by_knob("children_per_expansion")) == 2  # type: ignore[attr-defined]
     assert {row.value for row in ablations.by_knob("use_value_model")} == {"on", "off"}  # type: ignore[attr-defined]
+
+
+def test_the_identifiable_c_puct_sweep_runs_without_the_value_model(ablations: object) -> None:
+    """With the value model on, every positive c_puct gives the same ordering, so the grid is swept
+    again with it off, where Q is the graded visible pass fraction and the constant matters.
+
+    The mechanism: score = Q + c * P * sqrt(N) / (1 + n). With Q equal across siblings the argmax is
+    argmax of P / (1 + n) for *every* positive c - the constant cancels. The value model here scores
+    almost every candidate the same, so the positive rows are mechanically identical rather than
+    empirically tied.
+    """
+    on = {row.value: row for row in ablations.by_knob("c_puct")}  # type: ignore[attr-defined]
+    off = {row.value: row for row in ablations.by_knob(C_PUCT_OFF_KNOB)}  # type: ignore[attr-defined]
+    assert set(on) == set(off)
+    # Same values of the knob, and the off rows really ran without the model: their value estimates
+    # are pass fractions, so the recorded candidate usage is free to differ from the on rows.
+    assert all(row.stats.strategy == "mcts" for row in off.values())
 
 
 def test_every_row_is_measured_on_the_same_tasks_at_the_same_budget(

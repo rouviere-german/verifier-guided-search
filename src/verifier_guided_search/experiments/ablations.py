@@ -8,8 +8,18 @@ comparable:
 ``c_puct``
     The exploration weight. At ``0`` selection is pure argmax over the value estimate, so PUCT
     degenerates into a greedy descent over the value model and the tree stops widening. Large values
-    ignore the value model and spread visits by prior alone. The reported curve is the trade-off the
-    README claims exists; if it were flat, the knob would not be worth having.
+    ignore the value model and spread visits by prior alone.
+
+    **Only the ``0`` versus ``> 0`` contrast is identifiable with the value model on.** The PUCT
+    score is ``Q + c * P * sqrt(N) / (1 + n)``, so when ``Q`` is equal across siblings the argmax
+    reduces to ``P / (1 + n)`` and every positive ``c`` produces the *same* ordering. This value
+    model is saturated - it scores almost every candidate ~0.0001 - so ``Q`` is effectively constant
+    and the positive rows are mechanically identical, which the results file shows directly: the
+    ``0.7``, ``1.4`` and ``2.8`` rows agree to sixteen significant figures in
+    ``mean_sandbox_seconds``, i.e. they ran the same programs in the same order. That is a stronger
+    statement than "exploration does not help", and it is the reason the grid is also swept with
+    ``use_value_model=False`` (knob ``c_puct_value_model_off``), where ``Q`` is the graded visible
+    pass fraction, siblings differ, and the exploration constant really does change the argmax.
 ``children_per_expansion`` (k)
     How many candidates an expansion asks for. Small k means more expansions per candidate, which
     costs tokens; large k means a wide, shallow tree. With the candidate budget fixed, k trades tree
@@ -44,6 +54,7 @@ from verifier_guided_search.experiments.sweep import (
 from verifier_guided_search.tasks.suite import TaskSuite
 
 __all__ = [
+    "C_PUCT_OFF_KNOB",
     "DEFAULT_C_PUCT_GRID",
     "DEFAULT_K_GRID",
     "AblationResults",
@@ -54,6 +65,8 @@ __all__ = [
 DEFAULT_C_PUCT_GRID: Final[tuple[float, ...]] = (0.0, 0.7, 1.4, 2.8)
 DEFAULT_K_GRID: Final[tuple[int, ...]] = (2, 4, 8)
 _ABLATED_STRATEGY: Final = "mcts"
+#: Knob name for the c_puct grid run without the value model, where the constant is identifiable.
+C_PUCT_OFF_KNOB: Final = "c_puct_value_model_off"
 
 
 class AblationRow(BaseModel):
@@ -144,6 +157,20 @@ def run_ablations(
                 knob="c_puct",
                 value=f"{value:g}",
                 overrides={"c_puct": value},
+                budget=level,
+            )
+        )
+    for value in c_puct_grid:
+        # The identifiable version of the same sweep: with the value model off, Q is the graded
+        # visible pass fraction, so siblings differ and c_puct changes which child is selected.
+        rows.append(
+            _variant(
+                suite,
+                base,
+                deps,
+                knob=C_PUCT_OFF_KNOB,
+                value=f"{value:g}",
+                overrides={"c_puct": value, "use_value_model": False},
                 budget=level,
             )
         )
