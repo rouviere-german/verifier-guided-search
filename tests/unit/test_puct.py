@@ -20,6 +20,34 @@ from verifier_guided_search.search.puct import (
 
 pytestmark = pytest.mark.unit
 
+
+def test_a_non_finite_prior_is_refused_rather_than_silently_selecting_index_zero() -> None:
+    """``prior < 0`` is False for NaN, so NaN and inf used to be accepted.
+
+    The damage was quiet: ``puct_score`` then returned NaN, and ``select_index`` compares with
+    ``score > best_score``, which is False for every comparison against NaN - so selection
+    degenerated to "always the first child" instead of raising. A module whose whole point is that
+    its invariants are checkable must not have that failure mode.
+    """
+    for prior in (float("nan"), float("inf"), float("-inf")):
+        with pytest.raises(SearchError, match="prior must be a finite"):
+            ChildStats(prior=prior, visits=0, total_value=0.0)
+    for fallback in (float("nan"), float("inf")):
+        with pytest.raises(SearchError, match="finite"):
+            ChildStats(prior=0.5, visits=0, total_value=0.0, fallback_value=fallback)
+    with pytest.raises(SearchError, match="finite"):
+        ChildStats(prior=0.5, visits=1, total_value=float("nan"))
+
+
+def test_a_non_finite_c_puct_is_refused() -> None:
+    stats = ChildStats(prior=0.5, visits=0, total_value=0.0)
+    for c_puct in (float("nan"), float("inf")):
+        with pytest.raises(SearchError, match="c_puct must be a finite"):
+            exploration_term(stats, 4, c_puct)
+        with pytest.raises(SearchError, match="c_puct must be a finite"):
+            select_index([stats, stats], 4, c_puct)
+
+
 priors = st.floats(min_value=0.0, max_value=1.0, allow_nan=False, allow_infinity=False)
 values = st.floats(min_value=-5.0, max_value=5.0, allow_nan=False, allow_infinity=False)
 visits = st.integers(min_value=0, max_value=200)

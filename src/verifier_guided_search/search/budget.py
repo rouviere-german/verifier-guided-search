@@ -26,7 +26,11 @@ Dimensions
     optimisation, not a way to buy extra evaluations.
 ``generator_tokens``
     Input plus output tokens. The offline mutation generator reports a deterministic estimate for
-    the prompt it *would* have sent, so offline and live runs are charged on the same axis.
+    the prompt it *would* have sent, so offline and live runs are charged on the same axis. The
+    reservation charges an *estimated* input count (characters / 4); a live provider reports the
+    real one, which for a code prompt is routinely larger. That is a measurement error, not a
+    licence to overshoot, so the settle is clamped to the reservation and the shortfall is
+    accumulated on :attr:`BudgetAccountant.generator_token_overshoot` instead of being dropped.
 ``sandbox_micros``
     Microseconds of actual sandbox execution; a cache hit settles at zero.
 ``usd_micros``
@@ -221,6 +225,7 @@ class BudgetAccountant:
         self._committed = BudgetUsage()
         self._outstanding = BudgetUsage()
         self._refusals: list[str] = []
+        self._generator_token_overshoot = 0
 
     @property
     def spec(self) -> BudgetSpec:
@@ -238,6 +243,16 @@ class BudgetAccountant:
     def refusals(self) -> tuple[str, ...]:
         """Dimensions that have refused a reservation, in order."""
         return tuple(self._refusals)
+
+    @property
+    def generator_token_overshoot(self) -> int:
+        """Generator tokens really spent above what was reserved, summed over the run.
+
+        Non-zero means ``estimate_input_tokens`` is under-counting the prompt. The budget still
+        holds - the settle is clamped - but the token axis is then a lower bound, so the number is
+        reported rather than silently dropped.
+        """
+        return self._generator_token_overshoot
 
     @property
     def remaining(self) -> BudgetUsage:
@@ -280,8 +295,18 @@ class BudgetAccountant:
     def settle_generation(
         self, reservation: Reservation, *, model: str, input_tokens: int, output_tokens: int
     ) -> BudgetUsage:
+        """Charge what the call really cost, clamped to what was reserved for it.
+
+        Both dimensions are clamped, for the same reason sandbox microseconds are: the reservation
+        is built from an estimate, and a step that measures more than it reserved is a measurement
+        error. Raising here instead would kill the search on the first live prompt that beat
+        ``estimate_input_tokens``.
+        """
+        measured = input_tokens + output_tokens
+        tokens = min(measured, reservation.reserved.generator_tokens)
+        self._generator_token_overshoot += max(0, measured - tokens)
         return reservation.settle(
-            generator_tokens=input_tokens + output_tokens,
+            generator_tokens=tokens,
             usd_micros=min(
                 cost_usd_micros(model, input_tokens, output_tokens),
                 reservation.reserved.usd_micros,

@@ -214,6 +214,41 @@ def test_evaluation_reserves_the_wall_timeout_and_settles_the_real_duration() ->
     assert accountant.committed.sandbox_seconds == pytest.approx(0.2)
 
 
+def test_settling_more_generator_tokens_than_estimated_is_clamped_not_refused() -> None:
+    """A live prompt is routinely bigger than chars/4, and that must not crash the search.
+
+    ``reserve_generation`` charges an *estimate* of the input tokens (the offline generator's
+    ``estimate_input_tokens`` is characters / 4) while a real provider reports the true count,
+    summed over input, cache-creation and cache-read tokens. The first live call whose prompt beat
+    the estimate raised ``BudgetError`` out of ``settle_generation``, and ``run_search`` caught only
+    ``BudgetExhausted`` - so the search died with a traceback instead of degrading. Sandbox seconds
+    were already clamped for exactly this reason; tokens were not.
+    """
+    accountant = BudgetAccountant(_SPEC)
+    reservation = accountant.reserve_generation(
+        model="claude-sonnet-5", input_tokens=100, max_output_tokens=200
+    )
+    assert reservation.reserved.generator_tokens == 300
+    actual = accountant.settle_generation(
+        reservation, model="claude-sonnet-5", input_tokens=400, output_tokens=200
+    )
+    assert actual.generator_tokens == 300, "the settle is clamped to the reservation"
+    assert accountant.invariant_holds()
+    # Clamping hides an underestimate, so the shortfall is counted and reported.
+    assert accountant.generator_token_overshoot == 300
+
+
+def test_an_honest_generation_records_no_token_overshoot() -> None:
+    accountant = BudgetAccountant(_SPEC)
+    reservation = accountant.reserve_generation(
+        model="claude-sonnet-5", input_tokens=100, max_output_tokens=200
+    )
+    accountant.settle_generation(
+        reservation, model="claude-sonnet-5", input_tokens=100, output_tokens=50
+    )
+    assert accountant.generator_token_overshoot == 0
+
+
 def test_settling_longer_than_the_reserved_timeout_is_clamped_not_refused() -> None:
     """A watchdog can overshoot by microseconds; that must not crash a finished search."""
     accountant = BudgetAccountant(_SPEC)

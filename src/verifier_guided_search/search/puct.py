@@ -13,6 +13,10 @@ nor pessimistic by default. ``P(a)`` comes from the generator's rank of the cand
 Keeping this separate from the tree means the invariants are testable directly: monotone in the
 prior, monotone down in visits at fixed Q, and pure argmax over Q when ``c_puct`` is zero. Ties
 break towards the lowest index, so selection is deterministic without an RNG.
+
+Every input is checked for finiteness, not just for sign. A NaN passes ``x < 0``, and a NaN score
+loses every ``>`` comparison, so accepting one turned selection into "always the first child" with
+nothing raised anywhere - the quietest possible way for a search to stop searching.
 """
 
 from __future__ import annotations
@@ -40,8 +44,13 @@ class ChildStats:
     def __post_init__(self) -> None:
         if self.visits < 0:
             raise SearchError("visits must not be negative")
-        if self.prior < 0:
-            raise SearchError("prior must not be negative")
+        # ``prior < 0`` is False for NaN, so a non-finite prior used to be accepted and then made
+        # every score NaN. ``select_index`` compares with ``>``, which is False against NaN, so
+        # selection silently degenerated to "always the first child" rather than raising.
+        if not math.isfinite(self.prior) or self.prior < 0:
+            raise SearchError("prior must be a finite, non-negative number")
+        if not math.isfinite(self.total_value) or not math.isfinite(self.fallback_value):
+            raise SearchError("total_value and fallback_value must be finite")
 
     @property
     def q(self) -> float:
@@ -50,8 +59,8 @@ class ChildStats:
 
 def exploration_term(stats: ChildStats, parent_visits: int, c_puct: float) -> float:
     """``c_puct * P * sqrt(N_parent) / (1 + N_child)``, never negative."""
-    if c_puct < 0:
-        raise SearchError("c_puct must not be negative")
+    if not math.isfinite(c_puct) or c_puct < 0:
+        raise SearchError("c_puct must be a finite, non-negative number")
     if parent_visits < 0:
         raise SearchError("parent_visits must not be negative")
     return c_puct * stats.prior * math.sqrt(parent_visits) / (1 + stats.visits)

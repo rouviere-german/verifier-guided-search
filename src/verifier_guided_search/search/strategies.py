@@ -36,7 +36,7 @@ from typing import Final
 
 from verifier_guided_search.agentic.audit import AuditLog
 from verifier_guided_search.agentic.errors import ProviderError
-from verifier_guided_search.errors import BudgetExhausted, SearchError
+from verifier_guided_search.errors import BudgetError, BudgetExhausted, SearchError
 from verifier_guided_search.metrics import SearchMetrics
 from verifier_guided_search.mutate import hamming_distance
 from verifier_guided_search.sandbox.client import SandboxClient
@@ -468,6 +468,11 @@ def run_search(task: Task, context: SearchContext) -> SearchOutcome:
         stop_reason = f"budget:{exhausted.dimension}"
         if context.metrics is not None:
             context.metrics.budget_exhausted_total.labels(exhausted.dimension).inc()
+    except BudgetError as mistake:
+        # Not an exhausted budget: the accountant was used incorrectly (settled twice, a settle that
+        # does not fit its reservation). That is a bug, and it is reported as a stop reason so it
+        # surfaces in the results instead of aborting a whole sweep with a traceback.
+        stop_reason = f"budget_error:{type(mistake).__name__}"
     except ProviderError as failure:
         stop_reason = f"provider:{type(failure).__name__}"
     best = best_evaluation(tuple(evaluations))
@@ -496,6 +501,7 @@ def run_search(task: Task, context: SearchContext) -> SearchOutcome:
                 "stop_reason": stop_reason,
                 "evaluations": len(evaluations),
                 "usage": dict(context.accountant.committed.as_dict()),
+                "generator_token_overshoot": context.accountant.generator_token_overshoot,
             },
         )
     return outcome

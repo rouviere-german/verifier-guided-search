@@ -15,10 +15,16 @@ import pytest
 
 from verifier_guided_search.agentic.audit import AuditLog, verify_file
 from verifier_guided_search.agentic.errors import ProviderError
+from verifier_guided_search.errors import BudgetError
 from verifier_guided_search.experiments.sweep import SweepConfig, default_generator
 from verifier_guided_search.metrics import SearchMetrics, create_search_metrics
 from verifier_guided_search.sandbox.client import CachingSandbox
-from verifier_guided_search.search.budget import BudgetAccountant, BudgetSpec
+from verifier_guided_search.search.budget import (
+    BudgetAccountant,
+    BudgetSpec,
+    BudgetUsage,
+    Reservation,
+)
 from verifier_guided_search.search.generator import Generation
 from verifier_guided_search.search.node import SearchNode
 from verifier_guided_search.search.strategies import (
@@ -281,6 +287,47 @@ def test_the_value_model_switch_changes_the_node_scores(
     assert [item.value_estimate for item in without.evaluations] == [
         item.feedback.pass_fraction for item in without.evaluations
     ]
+
+
+def test_an_accounting_error_ends_the_search_with_a_reason(
+    tiny_suite: TaskSuite, shared_sandbox: CachingSandbox
+) -> None:
+    """``BudgetError`` is a bug, not an exhausted budget - and it still must not escape the search.
+
+    ``run_search`` caught ``BudgetExhausted`` and ``ProviderError`` only, so any accounting
+    mistake (a settle that does not fit its reservation, a reservation settled twice) came out of
+    the search as a traceback in the middle of a sweep. It is now a stop reason like any other.
+    """
+
+    class BrokenAccountant(BudgetAccountant):
+        """Raises the "the accountant was used incorrectly" error on a settle."""
+
+        def settle_generation(
+            self,
+            reservation: Reservation,
+            *,
+            model: str,
+            input_tokens: int,
+            output_tokens: int,
+        ) -> BudgetUsage:
+            raise BudgetError("simulated accounting mistake")
+
+    conf = settings("greedy")
+    accountant = BrokenAccountant(
+        BudgetSpec.of(candidates=4, tokens=10_000, sandbox_seconds=10.0, usd=1.0)
+    )
+    outcome = run_search(
+        tiny_suite.tasks[0],
+        SearchContext(
+            sandbox=shared_sandbox,
+            generator=default_generator(conf),
+            accountant=accountant,
+            config=conf.search_config("greedy"),
+        ),
+    )
+    assert outcome.stop_reason == "budget_error:BudgetError"
+    # The root was evaluated before the first expansion; the mistake ended the search there.
+    assert len(outcome.evaluations) == 1
 
 
 def test_a_failing_generator_ends_the_search_without_a_traceback(
