@@ -9,9 +9,13 @@ benchmark task, and its readiness probe fails when the verifier or the value mod
 
 from __future__ import annotations
 
+import threading
+import time
 from pathlib import Path
 from typing import Any, cast
 
+import anyio
+import httpx
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -23,6 +27,7 @@ from verifier_guided_search.api.service import (
     create_search_app,
     exec_limits,
 )
+from verifier_guided_search.core.concurrency import ConcurrencyLimiter
 from verifier_guided_search.core.config import Settings
 from verifier_guided_search.core.security import hash_api_key
 from verifier_guided_search.sandbox.client import CachingSandbox
@@ -161,6 +166,112 @@ def test_the_runner_reports_ready_only_when_its_sandbox_works(tmp_path: Path) ->
         response = client.get("/readyz")
     assert response.status_code == 503
     assert response.json()["checks"] == {"sandbox": "fail"}
+
+
+class _BlockingSandbox(LocalSandbox):
+    """A sandbox that parks inside ``execute`` until it is released.
+
+    Stands in for the real blocking work - ``subprocess.run`` up to the wall timeout plus a grace -
+    without needing a program that actually takes that long.
+    """
+
+    def __init__(self, workroot: Path, started: threading.Event, release: threading.Event) -> None:
+        super().__init__(workroot)
+        self._started = started
+        self._release = release
+
+    #: How long the fake blocking work lasts if nobody releases it. Long enough that a handler
+    #: running on the event loop is unmistakable in the timings below, short enough that a
+    #: regression fails in seconds.
+    BLOCK_SECONDS = 5.0
+
+    def execute(self, job: ExecJob) -> Any:
+        self._started.set()
+        self._release.wait(timeout=self.BLOCK_SECONDS)
+        return super().execute(job)
+
+
+def test_the_health_probes_answer_while_an_execution_is_in_flight(tmp_path: Path) -> None:
+    """The route must not run on the event loop, or one execution takes the probes down with it.
+
+    Both handlers do fully synchronous work. Declared ``async def`` they ran it on the loop, so
+    ``/healthz``, ``/readyz``, ``/metrics`` and the rate-limit middleware were stalled for the whole
+    duration of every execution and a single caller could wedge the process.
+
+    Written against an ASGI transport on one event loop rather than through ``TestClient``, because
+    that is exactly the condition being tested. The assertion is a timing one and has to be: with a
+    ``def`` handler Starlette runs the work in its threadpool and the probe comes back immediately,
+    while an ``async def`` handler holds the loop and the probe cannot be served until the work
+    finishes - so what separates the two is how long the probe took, not whether it answered.
+    """
+    started = threading.Event()
+    release = threading.Event()
+    app = create_runner_app(
+        settings(), sandbox=_BlockingSandbox(tmp_path / "sandbox", started, release)
+    )
+
+    async def scenario() -> tuple[int, int, float]:
+        statuses: dict[str, int] = {}
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://runner") as client:
+
+            async def execute() -> None:
+                response = await client.post("/v1/execute", json=job_payload(), headers=AUTH)
+                statuses["execute"] = response.status_code
+
+            async with anyio.create_task_group() as group:
+                started_at = time.perf_counter()
+                group.start_soon(execute)
+                with anyio.fail_after(_BlockingSandbox.BLOCK_SECONDS * 6):
+                    while not started.is_set():
+                        await anyio.sleep(0.01)
+                    probe = await client.get("/healthz")
+                answered_after = time.perf_counter() - started_at
+                statuses["healthz"] = probe.status_code
+                release.set()
+        return statuses["healthz"], statuses["execute"], answered_after
+
+    health_status, execute_status, answered_after = anyio.run(scenario)
+    assert health_status == 200
+    assert execute_status == 200
+    assert answered_after < _BlockingSandbox.BLOCK_SECONDS / 2, (
+        f"/healthz took {answered_after:.2f}s, so the execution was holding the event loop"
+    )
+
+
+def test_a_second_concurrent_execution_is_refused_rather_than_queued(tmp_path: Path) -> None:
+    """The threadpool is finite, so the route bounds itself and refuses the overflow quickly."""
+    started = threading.Event()
+    release = threading.Event()
+    app = create_runner_app(
+        settings(runner_max_concurrent_executions=1),
+        sandbox=_BlockingSandbox(tmp_path / "sandbox", started, release),
+    )
+
+    async def scenario() -> tuple[int, int]:
+        statuses: dict[str, int] = {}
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://runner") as client:
+
+            async def execute(label: str) -> None:
+                response = await client.post("/v1/execute", json=job_payload(), headers=AUTH)
+                statuses[label] = response.status_code
+
+            async with anyio.create_task_group() as group:
+                group.start_soon(execute, "first")
+                with anyio.fail_after(_BlockingSandbox.BLOCK_SECONDS * 6):
+                    while not started.is_set():
+                        await anyio.sleep(0.01)
+                    await execute("second")
+                release.set()
+        return statuses["first"], statuses["second"]
+
+    first, second = anyio.run(scenario)
+    assert first == 200
+    assert second == 503
+    limiter = cast(ConcurrencyLimiter, app.state.limiter)
+    assert limiter.limit == 1
+    assert limiter.refusals == 1
 
 
 def test_the_runner_exposes_only_its_own_routes(runner_client: TestClient) -> None:

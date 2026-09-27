@@ -32,6 +32,12 @@ Hardening that belongs to *this* process rather than to the container:
 ``verdicts are not free text``
     What comes back is the validated verdict model. A candidate's stdout and exception messages are
     counted and redacted into ``detail``, never forwarded verbatim into a prompt.
+``the route does not run on the event loop``
+    Executing a candidate blocks for up to the sandbox timeout plus a grace, so the handler is a
+    plain ``def`` that Starlette dispatches to its threadpool, and a
+    :class:`~verifier_guided_search.core.concurrency.ConcurrencyLimiter` caps how many run at once.
+    An ``async def`` handler here would stall ``/healthz``, ``/readyz`` and ``/metrics`` for the
+    duration of every execution.
 """
 
 from __future__ import annotations
@@ -43,6 +49,7 @@ from fastapi import FastAPI
 from prometheus_client import CollectorRegistry
 
 from verifier_guided_search.core.app import create_app
+from verifier_guided_search.core.concurrency import ConcurrencyLimiter
 from verifier_guided_search.core.config import Settings, get_settings
 from verifier_guided_search.core.logging import get_logger
 from verifier_guided_search.core.security import AuthenticatedPrincipal
@@ -83,13 +90,16 @@ def create_runner_app(
     root = workroot if workroot is not None else cfg.runner_workroot
     box = sandbox if sandbox is not None else LocalSandbox(root)
     search_metrics = metrics if metrics is not None else create_search_metrics(registry)
+    limiter = ConcurrencyLimiter(cfg.runner_max_concurrent_executions, name="execute")
 
     def routes(app: FastAPI) -> None:
+        # Deliberately ``def``, not ``async def``: see the module docstring.
         @app.post("/v1/execute", response_model=Verdict)
-        async def execute(job: ExecJob, principal: AuthenticatedPrincipal) -> Verdict:
+        def execute(job: ExecJob, principal: AuthenticatedPrincipal) -> Verdict:
             """Run one candidate program against one task's tests in a fresh child interpreter."""
             bounded = job.model_copy(update={"limits": clamp_limits(job.limits, cfg)})
-            verdict = box.execute(bounded)
+            with limiter.slot():
+                verdict = box.execute(bounded)
             search_metrics.verifier_verdicts_total.labels(verdict.status).inc()
             search_metrics.sandbox_exec_seconds.observe(verdict.duration_seconds)
             # The program hash, not the program: a log line is not a place for untrusted source.
@@ -111,4 +121,5 @@ def create_runner_app(
     )
     app.state.sandbox = box
     app.state.search_metrics = search_metrics
+    app.state.limiter = limiter
     return app

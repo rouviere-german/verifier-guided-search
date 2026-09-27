@@ -261,6 +261,7 @@ The threat this repo is built around is that **candidate programs are untrusted 
 | Value models verified against their own content hash before use; `/readyz` refuses an edited artifact | `value/registry.py` | [`test_value_registry.py`](tests/unit/test_value_registry.py) |
 | No pickle anywhere; the model ships as JSON | `value/model.py` | [`test_no_pickle.py`](tests/unit/test_no_pickle.py) |
 | API-key auth (digests only), rate limiting, body-size limits, PII redaction, non-leaking errors | `core/` | [`test_app.py`](tests/integration/test_app.py) |
+| Neither blocking route runs on the event loop, and each bounds its own concurrency, so one in-flight search cannot take `/healthz` down with it | `core/concurrency.py`, `api/` | [`test_the_health_probes_answer_while_an_execution_is_in_flight`](tests/integration/test_api.py) |
 
 Every claim in this file maps to a test, bench script or CI job in [CLAIMS.md](CLAIMS.md), and
 `scripts/check_baseline.py` fails if any of those references goes stale.

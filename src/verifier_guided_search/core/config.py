@@ -87,10 +87,16 @@ class Settings(BaseSettings):
     sandbox_memory_bytes: int = Field(default=256 * 1024 * 1024, ge=16 * 1024 * 1024)
     #: The runner's working root. In the image this is the tmpfs mount, the only writable path.
     runner_workroot: Path = Path("/sandbox")
+    #: Candidate executions allowed at once. Each one is a subprocess holding a threadpool thread,
+    #: and the container's CPU limit is what actually runs them, so the default is small.
+    runner_max_concurrent_executions: int = Field(default=4, ge=1, le=64)
 
     # --- search API limits ---
     search_max_candidates: int = Field(default=16, ge=1, le=256)
     search_default_strategy: str = Field(default="mcts", pattern=r"^[a-z_]{1,32}$")
+    #: Searches allowed at once. A search is many sandbox executions plus synchronous HTTP, so it
+    #: holds a threadpool thread for seconds; more of them than this get a 503 rather than a queue.
+    search_max_concurrent_searches: int = Field(default=2, ge=1, le=32)
     #: Pin a value-model version; unset uses whatever the registry points at.
     value_model_version: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
 

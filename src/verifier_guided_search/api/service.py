@@ -27,6 +27,12 @@ so a request cannot smuggle arbitrary code in through the search service and hav
 it on the caller's terms - the tests that a candidate is measured against are always the
 benchmark's. Budgets are clamped to ``search_max_candidates``, so one request cannot spend an
 unbounded amount of verifier time.
+
+It also will not run on the event loop. A search is up to sixteen sandbox executions plus
+synchronous HTTP to the runner, so it is a plain ``def`` dispatched to Starlette's threadpool and a
+:class:`~verifier_guided_search.core.concurrency.ConcurrencyLimiter` caps how many searches run at
+once; the rest get a 503. As an ``async def`` a single search held the loop for its whole duration,
+which took ``/healthz`` down with it.
 """
 
 from __future__ import annotations
@@ -38,6 +44,7 @@ from prometheus_client import CollectorRegistry
 from pydantic import BaseModel, ConfigDict, Field
 
 from verifier_guided_search.core.app import ReadinessCheck, create_app
+from verifier_guided_search.core.concurrency import ConcurrencyLimiter
 from verifier_guided_search.core.config import Settings, get_settings
 from verifier_guided_search.core.errors import AppError
 from verifier_guided_search.core.logging import get_logger
@@ -166,10 +173,12 @@ def create_search_app(
     verifier = sandbox if sandbox is not None else build_sandbox(cfg, metrics=search_metrics)
     model = value_model if value_model is not None else _load_quietly(cfg)
     generator = MutationGenerator()
+    limiter = ConcurrencyLimiter(cfg.search_max_concurrent_searches, name="search")
 
     def routes(app: FastAPI) -> None:
+        # Deliberately ``def``, not ``async def``: see the module docstring.
         @app.post("/v1/search", response_model=SearchResponse)
-        async def search(body: SearchRequest, principal: AuthenticatedPrincipal) -> SearchResponse:
+        def search(body: SearchRequest, principal: AuthenticatedPrincipal) -> SearchResponse:
             """Run one budgeted search over one benchmark task."""
             try:
                 task = tasks.get(body.task_id)
@@ -196,18 +205,19 @@ def create_search_app(
                     usd=_USD_CAP,
                 )
             )
-            outcome = run_search(
-                task,
-                SearchContext(
-                    sandbox=verifier,
-                    generator=generator,
-                    accountant=accountant,
-                    config=config,
-                    value_model=model if body.use_value_model else None,
-                    metrics=search_metrics,
-                    actor=f"api:{principal.key_id}",
-                ),
-            )
+            with limiter.slot():
+                outcome = run_search(
+                    task,
+                    SearchContext(
+                        sandbox=verifier,
+                        generator=generator,
+                        accountant=accountant,
+                        config=config,
+                        value_model=model if body.use_value_model else None,
+                        metrics=search_metrics,
+                        actor=f"api:{principal.key_id}",
+                    ),
+                )
             answer = outcome.answer
             _log.info(
                 "search_completed",
@@ -248,6 +258,7 @@ def create_search_app(
         routes=routes,
     )
     app.state.sandbox = verifier
+    app.state.limiter = limiter
     app.state.value_model = model
     app.state.suite = tasks
     app.state.search_metrics = search_metrics
