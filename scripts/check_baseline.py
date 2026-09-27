@@ -7,6 +7,12 @@ The kind of repo comes from ``[tool.portfolio] kind`` in pyproject.toml: ``templ
 ``agentic`` or ``ml``. Evidence references in CLAIMS.md and docs/THREAT_MODEL.md, written as
 backticked ``tests/...py::test_name``, ``bench/...py`` or ``.github/workflows/ci.yml#job``, must
 resolve to a real test function, file or CI job.
+
+Every *other* repo-relative path mentioned anywhere in the source, the benchmarks, the scripts or
+the docs has to resolve as well. That check exists because the narrower one missed two real cases of
+rot: a module docstring citing a calibration bench that had never been written, and another citing a
+test file that had been renamed. A path in a docstring is a claim about the repo, and one that does
+not resolve is a false claim whether or not it also appears in CLAIMS.md.
 """
 
 from __future__ import annotations
@@ -109,6 +115,25 @@ _EVIDENCE = re.compile(
     r"`((?:tests|bench|scripts)/[A-Za-z0-9_./-]+\.py)(?:::([A-Za-z_][A-Za-z0-9_]*))?`"
     r"|`(\.github/workflows/[A-Za-z0-9_.-]+\.ya?ml)#([A-Za-z0-9_-]+)`"
 )
+#: Where a path reference is looked for, and what a path reference looks like. The prefixes are
+#: listed rather than "anything with a slash" so prose, URLs, container paths (``/sandbox``) and
+#: layout sketches (``<workroot>/control/harness.py``) are not mistaken for repository paths.
+_REFERENCE_ROOTS = ("src", "tests", "bench", "scripts", "docs", ".github", ".semgrep")
+_PATH_REFERENCE = re.compile(
+    r"(?<![\w./-])((?:" + "|".join(re.escape(name) for name in _REFERENCE_ROOTS) + r")"
+    r"/[A-Za-z0-9_./-]*[A-Za-z0-9_-]\.(?:py|md|json|ya?ml|toml|txt|cfg|ini))"
+)
+#: Files whose path references are checked. Generated documents are included: a generated stale
+#: reference is still a stale reference.
+_REFERENCE_GLOBS = (
+    "*.md",
+    "tasks.py",
+    "src/**/*.py",
+    "bench/**/*.py",
+    "scripts/**/*.py",
+    "docs/**/*.md",
+)
+
 # Pickle-family imports, plus pandas' pickle I/O (the ML kit ships pandas).
 _BANNED_SERIALIZATION = re.compile(
     r"^\s*(?:import|from)\s+(?:pickle|cPickle|_pickle|dill|joblib|cloudpickle|shelve)\b"
@@ -344,6 +369,26 @@ def check_evidence(root: Path, report: Report, document: str, *, minimum: int) -
             )
 
 
+def check_path_references(root: Path, report: Report) -> None:
+    """Every repo-relative path mentioned in source or docs must exist."""
+    seen: set[tuple[str, str]] = set()
+    for pattern in _REFERENCE_GLOBS:
+        for path in sorted(root.glob(pattern)):
+            if not path.is_file():
+                continue
+            where = path.relative_to(root).as_posix()
+            text = path.read_text(encoding="utf-8", errors="replace")
+            for match in _PATH_REFERENCE.finditer(text):
+                reference = match.group(1)
+                if (where, reference) in seen:
+                    continue
+                seen.add((where, reference))
+                report.require(
+                    (root / reference).exists(),
+                    f"{where}: references {reference}, which does not exist",
+                )
+
+
 def check_threat_model(root: Path, report: Report) -> None:
     threat_model = _read(root, "docs/THREAT_MODEL.md")
     for category in STRIDE:
@@ -365,6 +410,7 @@ def run_checks(root: Path) -> Report:
     check_ci(root, report)
     check_containers(root, report)
     check_hygiene(root, report, package)
+    check_path_references(root, report)
     check_threat_model(root, report)
     check_evidence(root, report, "CLAIMS.md", minimum=1)
     check_evidence(root, report, "docs/THREAT_MODEL.md", minimum=1)

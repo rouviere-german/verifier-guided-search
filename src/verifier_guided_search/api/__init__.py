@@ -10,8 +10,8 @@ repo is built around:
 * :mod:`verifier_guided_search.api.service` is the search service. It talks to the runner over the
   internal network and never runs candidate code itself. It is the only one with an ingress port.
 
-Neither mounts the Docker socket; ``tests/integration/test_no_docker_socket.py`` asserts that from
-the compose file and the Dockerfile rather than trusting the comment.
+Neither mounts the Docker socket; ``tests/integration/test_containers.py`` asserts that from the
+compose file and the Dockerfile rather than trusting the comment.
 """
 
 from __future__ import annotations
