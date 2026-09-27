@@ -154,16 +154,140 @@ def solve(a):
     assert not verdict.visible.all_passed
 
 
+_FRAME_WALKER = """
+import sys
+
+_TABLE = {}
+
+
+def _harvest():
+    depth = 0
+    while True:
+        try:
+            frame = sys._getframe(depth)
+        except ValueError:
+            return
+        for value in list(frame.f_locals.values()):
+            if isinstance(value, dict) and "hidden" in value and "visible" in value:
+                for group in ("visible", "hidden"):
+                    for case in value.get(group) or []:
+                        if isinstance(case, dict) and "expected" in case:
+                            _TABLE[repr(list(case.get("args") or []))] = case["expected"]
+        depth += 1
+
+
+_harvest()
+
+
+def solve(*args):
+    return _TABLE[repr(list(args))]
+"""
+
+
+def test_a_frame_walking_program_cannot_read_the_test_expectations(
+    sandbox: LocalSandbox,
+) -> None:
+    """Measurement integrity: the child is never told what the right answer is.
+
+    The harness and the candidate share one interpreter, so a candidate can walk ``sys._getframe``
+    into ``main()``'s locals and read the job it was given. That used to hand it every expected
+    value for *both* groups, so a program with no algorithm at all - a dict lookup keyed by the
+    arguments - passed every visible and every hidden test. No guard bypass was needed.
+
+    The fix is not a better guard: the child is sent the arguments and returns the entry point's
+    own outputs, and the parent grades them. A frame walker now finds a job with no expectations in
+    it, so it has nothing to return.
+    """
+    verdict = sandbox.execute(job_for(_FRAME_WALKER))
+    assert not verdict.hidden.all_passed, "the candidate read the hidden expectations"
+    assert not verdict.visible.all_passed, "the candidate read the visible expectations"
+    assert not verdict.hidden_solved
+
+
+def test_the_job_sent_to_the_child_carries_no_expected_values(tmp_path: Path) -> None:
+    """The structural half of the same claim, asserted on the bytes the child can read."""
+    sandbox = LocalSandbox(tmp_path / "work", keep_artifacts=True)
+    sandbox.execute(job_for(_WORKING, expected=2))
+    directories = [p for p in (tmp_path / "work" / "control").iterdir() if p.is_dir()]
+    assert len(directories) == 1
+    raw = (directories[0] / "job.json").read_text(encoding="utf-8")
+    payload = json.loads(raw)
+    assert "expected" not in raw
+    for group in ("visible", "hidden"):
+        for case in payload[group]:
+            assert set(case) == {"name", "args"}, case
+
+
+_IN_PROCESS_FORGER = """
+import sys
+
+
+def _writer():
+    depth = 0
+    while True:
+        try:
+            frame = sys._getframe(depth)
+        except ValueError:
+            return None
+        found = frame.f_locals.get("writer")
+        if found is not None and hasattr(found, "write"):
+            return found
+        depth += 1
+
+
+def solve(a):
+    writer = _writer()
+    if writer is None:
+        return "no-writer"
+    writer.write(
+        {
+            "status": "ok",
+            "visible": [{"name": "v00", "outcome": "returned", "output_json": "2"}],
+            "hidden": [{"name": "h00", "outcome": "returned", "output_json": "6"}],
+        }
+    )
+    return "definitely-wrong"
+"""
+
+
+def test_in_process_verdict_forgery_is_a_known_limitation(sandbox: LocalSandbox) -> None:
+    """Pins the residual risk in docs/THREAT_MODEL.md row S2, rather than claiming it away.
+
+    The parent's controls are about a result written from *outside* this execution: a wrong
+    nonce, a different program hash, a reopened result file. None of them can help against the child
+    itself. A candidate that walks ``sys._getframe`` to the harness's ``ResultWriter`` can latch a
+    payload of its own - ``ResultWriter`` writes once, so the harness's real write then becomes a
+    no-op - and it is stamped with the correct nonce and program hash because the child legitimately
+    holds both.
+
+    So this test asserts the forgery *works*, which is the honest statement. What changed with the
+    output-comparison protocol is the payoff: the forger below only passes because this test file
+    hard-codes 2 and 6. A candidate has to already know the expected outputs, and the child is no
+    longer told them (see ``test_a_frame_walking_program_cannot_read_the_test_expectations``). If a
+    future change does detect in-process forgery, delete this test and say so in CLAIMS.md #29.
+    """
+    verdict = sandbox.execute(job_for(_IN_PROCESS_FORGER))
+    assert verdict.status == "ok"
+    assert verdict.visible.all_passed, "if this now fails, the limitation was fixed - see docstring"
+    assert verdict.hidden.all_passed
+    assert verdict.violations == ()
+
+
 def test_a_forged_result_file_is_refused_by_the_parent(sandbox: LocalSandbox) -> None:
-    """Drive ``_read_result`` directly with a file a hostile child could have written."""
+    """Drive ``_read_result`` directly with a file a hostile child could have written.
+
+    Note what a forging child now has to produce: the *outputs* the parent will compare, not a
+    ``"status": "pass"`` it can simply assert. It cannot know them without solving the task, which
+    is what the expectations leaving the child bought.
+    """
     sandbox.prepare()
     job = job_for(_WORKING)
     passing: dict[str, object] = {
         "nonce": "the-right-nonce",
         "program_sha256": job.program_sha256,
         "status": "ok",
-        "visible": [{"name": "v00", "status": "pass", "error_class": None}],
-        "hidden": [{"name": "h00", "status": "pass", "error_class": None}],
+        "visible": [{"name": "v00", "outcome": "returned", "output_json": "2"}],
+        "hidden": [{"name": "h00", "outcome": "returned", "output_json": "6"}],
     }
     path = sandbox.workroot / "forged.json"
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -177,6 +301,14 @@ def test_a_forged_result_file_is_refused_by_the_parent(sandbox: LocalSandbox) ->
     honest = read(passing, "the-right-nonce")
     assert honest.status == "ok"
     assert honest.visible.all_passed
+    assert honest.hidden.all_passed
+
+    wrong_output = read(
+        {**passing, "visible": [{"name": "v00", "outcome": "returned", "output_json": "99"}]},
+        "the-right-nonce",
+    )
+    assert wrong_output.status == "ok"
+    assert not wrong_output.visible.all_passed, "the parent grades, so a wrong output cannot pass"
 
     replayed = read(passing, "a-different-nonce")
     assert replayed.status == "crashed"
@@ -189,9 +321,30 @@ def test_a_forged_result_file_is_refused_by_the_parent(sandbox: LocalSandbox) ->
     assert made_up_status.status == "crashed"
 
     malformed_rows = read(
-        {**passing, "visible": [{"name": "v00", "status": "great"}]}, "the-right-nonce"
+        {**passing, "visible": [{"name": "v00", "outcome": "great"}]}, "the-right-nonce"
     )
     assert malformed_rows.status == "crashed"
+
+    renamed_case = read(
+        {
+            **passing,
+            "visible": [{"name": "somethingelse", "outcome": "returned", "output_json": "2"}],
+        },
+        "the-right-nonce",
+    )
+    assert renamed_case.status == "crashed"
+
+    extra_rows = read(
+        {
+            **passing,
+            "visible": [
+                {"name": "v00", "outcome": "returned", "output_json": "2"},
+                {"name": "v00", "outcome": "returned", "output_json": "2"},
+            ],
+        },
+        "the-right-nonce",
+    )
+    assert extra_rows.status == "crashed"
 
     path.write_text("{ not json", encoding="utf-8")
     unparseable = sandbox._read_result(

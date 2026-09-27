@@ -79,6 +79,17 @@ property of the signatures ([`sandbox/protocol.py`](src/verifier_guided_search/s
 and [a property test](tests/unit/test_value_features.py) confirms that permuting every hidden result
 leaves the feature vector byte-identical.
 
+That covers the search. The *candidate* is a second reader, and types cannot help there: the harness
+and the candidate share one interpreter, so a program can walk `sys._getframe` into the harness's
+locals and read whatever the harness was given. A review found exactly that - a candidate that
+harvested the job's expected values and returned them from a dict passed every hidden test with no
+algorithm at all, and no guard bypass was needed. So the expectations no longer enter the sandbox:
+the child is sent each case's *arguments*, reports what the entry point returned, and the parent
+compares outputs with expectations
+([`grade_group`](src/verifier_guided_search/sandbox/protocol.py),
+[regression test](tests/integration/test_sandbox_local.py)). The child holds nothing worth stealing,
+which also takes most of the value out of forging a verdict.
+
 **A smaller budget is a prefix of a larger one.** Every strategy is a generator that yields one
 evaluation at a time and never inspects the remaining budget, so a run capped at `B` candidates
 produces exactly the first `B` evaluations of a longer run. The sweep therefore runs each
@@ -190,12 +201,23 @@ settle it".
 
 ### Sandbox escape suite
 
-**100% of 14 attempts blocked** - socket connect, DNS lookup, HTTP fetch, subprocess spawn, `ctypes`
-load, writes and reads and `listdir` and `chdir` outside the jail, `/proc` probing, environment
-secret reads, a fork bomb, a thread bomb and a long sleep. 11 were refused by the in-process audit
+**100% of 18 attempts blocked** - socket connect, DNS lookup, HTTP fetch, subprocess spawn,
+`ctypes` load, writes and reads and `listdir` and `chdir` outside the jail, renaming and hard-linking
+a file out of the jail, an `os.open` write into the standard library, `/proc` probing, environment
+secret reads, a fork bomb, two thread bombs and a long sleep. 14 were refused by the in-process audit
 guard; the rest by the environment allowlist or the wall-clock watchdog. Each attempt is a program
 whose single test passes *only if the escape succeeded*, so "blocked" means "no attempt returned its
 success marker" and not merely "nothing crashed".
+
+Four of the 18 exist because an adversarial review got out and they now pin the fixes. The guard
+checked only the *first* path argument of an audit event, so the destination of `os.rename`,
+`os.replace` and `os.link` was never checked and a candidate could move or hard-link a file from its
+jail to any absolute path; and it decided "is this a write?" from the mode string alone, which
+`os.open` does not supply, so `os.open(<stdlib file>, O_WRONLY|O_CREAT)` fell through to the lenient
+*read* check. The fourth is `thread_bomb_via_subclasses`, which is **not** refused by the guard: the
+import deny-list removes names from `sys.modules` and cannot remove the live `Thread` class that
+`object.__subclasses__()` still reaches. It is in the suite to pin which control does stop it - the
+wall-clock watchdog, and `pids_limit` in the container.
 
 ### Micro-benchmarks
 

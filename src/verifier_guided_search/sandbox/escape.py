@@ -12,6 +12,13 @@ outside the writable jail, reading a file outside the jail and the standard libr
 out of the environment, probing ``/proc``, loading native code through ``ctypes``, spawning a
 subprocess, and sleeping past the wall-clock limit.
 
+Four attempts exist because a review found the guard let them through, and they are the reason the
+guard now checks *every* path argument of a two-path event and decides "is this a write?" from the
+``os.open`` flags as well as the mode string: ``rename_out_of_jail``, ``hardlink_out_of_jail``,
+``os_open_write_outside_jail`` and ``thread_bomb_via_subclasses``. The last one is still *not*
+refused by the guard - the import deny-list cannot remove a live class object - and it is in the
+suite to pin which control does stop it.
+
 Two mechanisms do the work, and the suite is written so it is visible which one caught what:
 
 * ``audit_hook`` attempts are refused by :func:`verifier_guided_search.sandbox.child.install_guard`.
@@ -337,6 +344,111 @@ def probe():
     hints=["import:threading", "import:_thread"],
 )
 
+_THREAD_VIA_SUBCLASSES = _attempt(
+    "thread_bomb_via_subclasses",
+    "resources",
+    "platform",
+    (
+        "The same thread bomb, but around the import deny-list: purge_denied_modules() removes "
+        "names from sys.modules and cannot remove the live Thread class, which is still reachable "
+        "through object.__subclasses__() because the harness imported threading for its own "
+        "watchdog. So the guard does NOT refuse this one - it is pinned here to show which control "
+        "actually stops it: the wall-clock watchdog (and pids_limit in the container). If the "
+        "watchdog regressed, this attempt would return the marker."
+    ),
+    """
+def probe():
+    import time
+
+    try:
+        thread = [c for c in object.__subclasses__() if c.__name__ == "Thread"][0]
+        start = thread.__init__.__globals__["_start_new_thread"]
+        for _ in range(8):
+            start(time.sleep, (30,))
+    except Exception:
+        pass
+    time.sleep(30)
+    return "escaped"
+""",
+    statuses=["timeout"],
+    must_be_blocked=False,
+    timeout_seconds=0.5,
+)
+
+_RENAME_OUT = _attempt(
+    "rename_out_of_jail",
+    "filesystem",
+    "audit_hook",
+    (
+        "Create a file inside the jail, then move it out. Regression: the guard used to check only "
+        "the *first* path argument of an audit event, so the destination of a two-path event "
+        "(os.rename, os.replace, os.link, os.symlink, shutil.move) was never checked at all."
+    ),
+    f"""
+def probe():
+    import os
+
+    parent = os.path.dirname(os.path.abspath(os.getcwd()))
+    source = os.path.join(os.getcwd(), "payload.txt")
+    handle = open(source, "w")
+    handle.write("x")
+    handle.close()
+{_TRY}        os.rename(source, os.path.join(parent, "escaped_by_rename.txt"))
+        return "escaped"
+{_EXCEPT}""",
+    statuses=["blocked"],
+    hints=["os.rename"],
+)
+
+_HARDLINK_OUT = _attempt(
+    "hardlink_out_of_jail",
+    "filesystem",
+    "audit_hook",
+    (
+        "Hard-link a file in the jail to a path outside it, which gives the same bytes a second "
+        "name the guard never sees again. The destination is the second argument of os.link."
+    ),
+    f"""
+def probe():
+    import os
+
+    parent = os.path.dirname(os.path.abspath(os.getcwd()))
+    source = os.path.join(os.getcwd(), "linked.txt")
+    handle = open(source, "w")
+    handle.write("x")
+    handle.close()
+{_TRY}        os.link(source, os.path.join(parent, "escaped_by_link.txt"))
+        return "escaped"
+{_EXCEPT}""",
+    statuses=["blocked"],
+    hints=["os.link"],
+)
+
+_OS_OPEN_WRITE = _attempt(
+    "os_open_write_outside_jail",
+    "filesystem",
+    "audit_hook",
+    (
+        "Open a standard-library file for writing through os.open instead of open(). CPython "
+        "raises the same `open` audit event with mode=None and the flags in args[2], so a guard "
+        "that decides 'is this a write?' from the mode string alone falls through to the lenient "
+        "*read* check - and the standard library is a read root. The target is a file that "
+        "already exists inside that read root, and the attempt writes no bytes: holding a write "
+        "descriptor on a file outside the jail is already the containment failure, and proving it "
+        "that way keeps the suite safe to run on a developer's own interpreter."
+    ),
+    f"""
+def probe():
+    import os
+
+{_TRY}        descriptor = os.open(os.__file__, os.O_WRONLY)
+        os.close(descriptor)
+        return "escaped"
+{_EXCEPT}""",
+    statuses=["blocked"],
+    hints=["open:write"],
+)
+
 _LONG_SLEEP = _attempt(
     "long_sleep",
     "resources",
@@ -382,13 +494,17 @@ ESCAPE_SUITE: Final[tuple[EscapeAttempt, ...]] = (
     _SUBPROCESS,
     _CTYPES,
     _WRITE_OUTSIDE,
+    _OS_OPEN_WRITE,
     _READ_OUTSIDE,
     _LIST_OUTSIDE,
     _CHDIR_OUT,
+    _RENAME_OUT,
+    _HARDLINK_OUT,
     _ENV_SECRETS,
     _PROC_PROBE,
     _FORK_BOMB,
     _THREAD_BOMB,
+    _THREAD_VIA_SUBCLASSES,
     _LONG_SLEEP,
 )
 _BY_NAME: Final[Mapping[str, EscapeAttempt]] = {item.name: item for item in ESCAPE_SUITE}

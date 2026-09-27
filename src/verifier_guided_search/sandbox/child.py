@@ -17,8 +17,16 @@ Order of operations, which is the whole point of the file:
 3. compile the program - a syntax error is a verdict, not a crash;
 4. install the audit hook (see :func:`install_guard`), which is the point of no return: audit hooks
    cannot be removed;
-5. execute the program, run the visible tests and then the hidden ones, and write the result
-   through the handle from step 1.
+5. execute the program, call the entry point once per visible case and then once per hidden case,
+   and write **what it returned** through the handle from step 1.
+
+Step 5 is deliberately not "run the tests". The job carries the arguments of every case and no
+expected value at all, and :func:`run_group` reports the entry point's own output; the parent
+compares it with the expectations (:func:`verifier_guided_search.sandbox.protocol.grade_group`). The
+reason is that this file shares an interpreter with the candidate: a program can walk
+``sys._getframe`` into ``main()``'s locals and read the job. While the job held expectations, a
+program that did so and returned them from a dict passed every hidden test with no algorithm at all.
+Nothing in the guard could have stopped that, so the expectations left the process instead.
 
 The guard is defence in depth, not the security boundary. It blocks the obvious escapes - sockets,
 name lookups, subprocesses, ``ctypes``, writes or reads outside the jail, a deny-list of modules -
@@ -33,6 +41,7 @@ this file makes the common cases cheap to block and easy to test. See docs/THREA
 from __future__ import annotations
 
 import json
+import math
 import os
 import sys
 import threading
@@ -42,6 +51,8 @@ from typing import Any
 
 MAX_DETAIL = 400
 MAX_NORMALIZE_DEPTH = 12
+#: Cap on the JSON a single call may report back. The parent enforces the same number on the way in.
+MAX_OUTPUT_CHARS = 4096
 EXIT_OK = 0
 EXIT_USAGE = 2
 EXIT_TIMEOUT = 3
@@ -108,32 +119,42 @@ BLOCKED_EVENTS = frozenset(
         "webbrowser.open",
     }
 )
-#: Audit events whose first argument is a path that must stay inside the jail.
-JAILED_PATH_EVENTS = frozenset(
-    {
-        "os.chdir",
-        "os.chmod",
-        "os.chown",
-        "os.link",
-        "os.listdir",
-        "os.mkdir",
-        "os.remove",
-        "os.rename",
-        "os.rmdir",
-        "os.scandir",
-        "os.symlink",
-        "os.truncate",
-        "os.utime",
-        "shutil.copyfile",
-        "shutil.copymode",
-        "shutil.copystat",
-        "shutil.copytree",
-        "shutil.move",
-        "shutil.rmtree",
-        "shutil.unpack_archive",
-    }
-)
+#: Audit events with path arguments that must stay inside the jail, mapped to *every* argument
+#: position that is a path. Checking only ``args[0]`` is a containment failure: ``os.rename``,
+#: ``os.replace`` (which raises ``os.rename``), ``os.link``, ``os.symlink`` and the ``shutil`` pairs
+#: all take a *destination*, and a candidate that creates a file in its jail and then renames or
+#: hard-links it out has written outside the jail without ever tripping a first-argument check. The
+#: positions are listed rather than "check them all" because some of these events carry non-path
+#: arguments that a path check would reject out of hand (``os.utime`` passes a tuple of times,
+#: ``os.chmod`` an int mode).
+JAILED_PATH_EVENTS: dict[str, tuple[int, ...]] = {
+    "os.chdir": (0,),
+    "os.chmod": (0,),
+    "os.chown": (0,),
+    "os.link": (0, 1),
+    "os.listdir": (0,),
+    "os.mkdir": (0,),
+    "os.remove": (0,),
+    "os.removexattr": (0,),
+    "os.rename": (0, 1),
+    "os.rmdir": (0,),
+    "os.scandir": (0,),
+    "os.setxattr": (0,),
+    "os.symlink": (0, 1),
+    "os.truncate": (0,),
+    "os.utime": (0,),
+    "shutil.copyfile": (0, 1),
+    "shutil.copymode": (0, 1),
+    "shutil.copystat": (0, 1),
+    "shutil.copytree": (0, 1),
+    "shutil.move": (0, 1),
+    "shutil.rmtree": (0,),
+    "shutil.unpack_archive": (0, 1),
+}
 _WRITE_MODE_CHARS = "wax+"
+#: Flag bits that make an ``os.open`` a write. ``os.open`` raises the ``open`` audit event with
+#: ``mode=None``, so the mode string says nothing about it and only the flags do.
+_WRITE_FLAGS = os.O_WRONLY | os.O_RDWR | os.O_APPEND | os.O_CREAT | os.O_TRUNC | os.O_EXCL
 
 #: Populated by the guard before it raises, so a swallowed violation still reaches the verdict.
 VIOLATIONS: list[str] = []
@@ -235,6 +256,28 @@ def purge_denied_modules() -> tuple[str, ...]:
     return tuple(dropped)
 
 
+def opens_for_writing(mode: object, flags: object) -> bool:
+    """Is this ``open`` audit event a write? Read the flags, not just the mode string.
+
+    CPython raises one ``open`` event for ``io.open``, ``os.open`` and ``os.fdopen``, with
+    ``(path, mode, flags)``. ``io.open`` fills in the mode string; ``os.open`` passes ``None`` and
+    puts everything in the integer flags. Deciding from the mode alone therefore classified every
+    ``os.open`` as a read and sent it to the lenient read check - which accepts the standard library
+    - so ``os.open(<stdlib file>, O_WRONLY | O_CREAT)`` was a write outside the jail that the guard
+    waved through. Anything this function cannot classify is treated as a write, because a false
+    "read" is a containment failure while a false "write" only costs a candidate access to a file it
+    has no business opening for writing anyway.
+    """
+    if isinstance(mode, str):
+        # A mode string is complete on its own: every writing mode contains one of "wax+". The
+        # flags are not consulted here because a platform is free to add bits of its own to a
+        # read-only open, and misreading one of those as a write would refuse every ``import``.
+        return any(char in mode for char in _WRITE_MODE_CHARS)
+    if isinstance(flags, int) and not isinstance(flags, bool):
+        return bool(flags & _WRITE_FLAGS)
+    return True
+
+
 def install_guard(jail: str, allowed_read_roots: Sequence[str]) -> None:
     """Install the audit hook. Irreversible; call it last, immediately before executing."""
     purge_denied_modules()
@@ -246,18 +289,21 @@ def install_guard(jail: str, allowed_read_roots: Sequence[str]) -> None:
         if event in BLOCKED_EVENTS:
             raise _record(event)
         if event == "open":
-            path, mode = args[0], args[1]
-            writing = isinstance(mode, str) and any(char in mode for char in _WRITE_MODE_CHARS)
-            if writing:
+            path = args[0] if args else None
+            mode = args[1] if len(args) > 1 else None
+            flags = args[2] if len(args) > 2 else None
+            if opens_for_writing(mode, flags):
                 if not _under(path, write_roots, strict=True):
                     raise _record("open:write")
                 return
             if not _under(path, read_only_roots):
                 raise _record("open:read")
             return
-        if event in JAILED_PATH_EVENTS:
-            if not _under(args[0] if args else None, write_roots, strict=True):
-                raise _record(event)
+        positions = JAILED_PATH_EVENTS.get(event)
+        if positions is not None:
+            for index in positions:
+                if index < len(args) and not _under(args[index], write_roots, strict=True):
+                    raise _record(event)
             return
         if event == "import":
             root = str(args[0]).split(".")[0]
@@ -298,13 +344,61 @@ else:
         return tuple(notes)
 
 
-def _normalize(value: object, depth: int = 0) -> object:
-    """Tuples become lists so a candidate result compares equal to JSON expectations."""
+class Unrepresentable(Exception):
+    """A returned value that cannot be sent back as JSON. Graded as a failing test by the parent."""
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
+
+
+def _encode(value: object, depth: int = 0) -> object:
+    """A candidate's return value as plain JSON data, or :class:`Unrepresentable`.
+
+    Exact base types are extracted with unbound base-class calls (``int.__index__`` and friends)
+    rather than ``int(value)``, so a subclass that overrides ``__repr__``, ``__int__`` or ``items``
+    cannot change what the parent is told the program returned. Tuples become lists because the
+    expectations they are graded against came from JSON.
+    """
     if depth > MAX_NORMALIZE_DEPTH:
-        return "<too-deep>"
+        raise Unrepresentable("depth")
+    if value is None:
+        return None
+    if isinstance(value, bool):  # before int: bool is a subclass of it
+        return value is True
+    if isinstance(value, int):
+        return int.__index__(value)
+    if isinstance(value, float):
+        number = float.__float__(value)
+        # NaN and the infinities have no JSON spelling: json.dumps would emit a bare NaN or
+        # Infinity, which is not JSON the parent will parse.
+        if not math.isfinite(number):
+            raise Unrepresentable("non_finite")
+        return number
+    if isinstance(value, str):
+        return str.__str__(value)
     if isinstance(value, (list, tuple)):
-        return [_normalize(item, depth + 1) for item in value]
-    return value
+        items = list(value) if type(value) in (list, tuple) else list(iter(value))
+        return [_encode(item, depth + 1) for item in items]
+    if isinstance(value, dict):
+        encoded: dict[str, object] = {}
+        for key, item in dict.items(value):
+            if not isinstance(key, str):
+                raise Unrepresentable("key_type")
+            encoded[str.__str__(key)] = _encode(item, depth + 1)
+        return encoded
+    raise Unrepresentable("type")
+
+
+def encode_output(value: object) -> str:
+    """The JSON the child reports for one call, or :class:`Unrepresentable` if it will not fit."""
+    try:
+        text = json.dumps(_encode(value), sort_keys=True)
+    except (TypeError, ValueError, RecursionError, OverflowError) as exc:
+        raise Unrepresentable("encode") from exc
+    if len(text) > MAX_OUTPUT_CHARS:
+        raise Unrepresentable("size")
+    return text
 
 
 def _detail(exc: BaseException) -> str:
@@ -319,20 +413,30 @@ def _safe_class_name(exc: BaseException) -> str:
 def run_group(
     function: Callable[..., object], cases: Iterable[dict[str, Any]]
 ) -> list[dict[str, Any]]:
-    """Run one test group: one entry per case - pass, fail, or error with the exception class."""
+    """Call the entry point once per case and report **what it returned**, never whether it passed.
+
+    This is the whole reason the child no longer receives expected values. The harness and the
+    candidate share one interpreter, so a candidate can walk ``sys._getframe`` into ``main()``'s
+    locals and read the job it was handed; when the job carried expectations, a program that looked
+    them up and returned them passed every hidden test with no algorithm at all, and no guard bypass
+    was needed. Grading happens in the parent process, which the candidate cannot reach, so the only
+    thing here worth stealing is the arguments it was already called with.
+    """
     results: list[dict[str, Any]] = []
     for case in cases:
         name = str(case["name"])
         args = list(case.get("args") or [])
         try:
-            actual = _normalize(function(*args))
+            output = encode_output(function(*args))
         except SandboxViolation:
             raise
-        except BaseException as exc:  # noqa: BLE001 - any failure of untrusted code is a data point
-            results.append({"name": name, "status": "error", "error_class": _safe_class_name(exc)})
+        except Unrepresentable as exc:
+            results.append({"name": name, "outcome": "unrepresentable", "reason": exc.reason})
             continue
-        passed = actual == _normalize(case.get("expected"))
-        results.append({"name": name, "status": "pass" if passed else "fail", "error_class": None})
+        except BaseException as exc:  # noqa: BLE001 - any failure of untrusted code is a data point
+            results.append({"name": name, "outcome": "error", "error_class": _safe_class_name(exc)})
+            continue
+        results.append({"name": name, "outcome": "returned", "output_json": output})
     return results
 
 

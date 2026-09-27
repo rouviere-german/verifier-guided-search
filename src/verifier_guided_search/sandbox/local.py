@@ -7,9 +7,15 @@ Layout of a single execution::
     <workroot>/control/<exec>/result.json  opened by the child before its guard goes up
     <workroot>/jail/<exec>/              the child's cwd and its only writable directory
 
-``control/`` sits outside the jail, so a candidate program can neither read the job (which holds the
-hidden tests) nor rewrite the result file. Inside the container ``workroot`` is a tmpfs mount, which
-is why the jail is a directory rather than a chroot.
+``control/`` sits outside the jail, so a candidate program cannot open the job or the result
+file through the filesystem. Inside the container ``workroot`` is a tmpfs mount, which is why the
+jail is a directory rather than a chroot.
+
+That is a filesystem control, and it is **not** what keeps the hidden tests secret: the child reads
+the job into its own address space, and a candidate can walk ``sys._getframe`` into the harness's
+locals without touching the filesystem at all. So the job carries every case's *arguments* and no
+expected value, the child reports what the entry point returned, and ``grade_group`` compares
+outputs with expectations here, in a process the candidate never runs in.
 
 Every execution gets a fresh directory and a fresh process; nothing is reused between programs
 except the copied harness. The environment handed to the child is an allowlist, so a secret in the
@@ -33,6 +39,7 @@ import subprocess  # nosec B404
 import sys
 import time
 import uuid
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, Final
 
@@ -41,12 +48,14 @@ from verifier_guided_search.core.redaction import redact_text
 from verifier_guided_search.sandbox import child as child_module
 from verifier_guided_search.sandbox.protocol import (
     ERROR_CLASS_PATTERN,
+    CaseOutcome,
     ExecJob,
     GroupResult,
-    TestResult,
     Verdict,
     VerdictStatus,
+    grade_group,
 )
+from verifier_guided_search.tasks.models import TestCase
 
 __all__ = ["HARNESS_NAME", "LocalSandbox", "SandboxError", "child_environment"]
 
@@ -78,6 +87,9 @@ _ENV_ALLOWLIST: Final = (
     "LC_ALL",
 )
 _VIOLATION_MAX = 16
+#: Cap on the result file the parent will read. The child writes a few kilobytes; anything larger is
+#: a child that has stopped following the protocol, and it is refused rather than parsed.
+_MAX_RESULT_BYTES: Final = 1024 * 1024
 
 
 class SandboxError(RuntimeError):
@@ -96,16 +108,46 @@ def _clean(text: str, limit: int = _MAX_DETAIL) -> str:
     return redact_text(text)[:limit]
 
 
-def _results(raw: object) -> GroupResult:
-    """Validate the child's per-test rows; anything malformed makes the whole verdict unusable."""
+def _graded(raw: object, cases: Sequence[TestCase]) -> GroupResult:
+    """Validate the child's per-case rows and grade them against ``cases``.
+
+    Anything malformed - not a list, not objects, a row that will not validate, a row count or a
+    name that does not line up with the cases - makes the whole verdict unusable. The caller turns
+    that into ``crashed``, never into a pass.
+    """
     if not isinstance(raw, list):
-        raise TypeError("test group is not a list")
-    rows: list[TestResult] = []
+        raise TypeError("case outcome group is not a list")
+    if not raw:
+        # No run happened: a syntax error, a guard refusal, a timeout or a kill. An empty group has
+        # a pass fraction of 0 and ``all_passed`` False, so nothing here can become a pass.
+        return GroupResult()
+    rows: list[CaseOutcome] = []
     for item in raw:
         if not isinstance(item, dict):
-            raise TypeError("test result is not an object")
-        rows.append(TestResult.model_validate(item))
-    return GroupResult(results=tuple(rows))
+            raise TypeError("case outcome is not an object")
+        rows.append(CaseOutcome.model_validate(item))
+    return grade_group(cases, rows)
+
+
+def _read_result_file(path: Path) -> object:
+    """Parse the result file, refusing one larger than the protocol allows.
+
+    The child writes a few kilobytes. A child that writes a gigabyte has stopped following the
+    protocol, and the parent declines to load it into memory to find out.
+    """
+    if path.stat().st_size > _MAX_RESULT_BYTES:
+        raise ValueError("result file is larger than the protocol allows")
+    parsed: object = json.loads(path.read_text(encoding="utf-8"))
+    return parsed
+
+
+def _case_arguments(case: TestCase) -> dict[str, Any]:
+    """The part of a test case the child is allowed to see: its name and its arguments.
+
+    Spelled out field by field rather than dumping the model minus one key, so a new field on
+    ``TestCase`` cannot start travelling into the sandbox by accident.
+    """
+    return {"name": case.name, "args": list(case.args)}
 
 
 class LocalSandbox:
@@ -183,8 +225,9 @@ class LocalSandbox:
             "program": job.program,
             "program_sha256": job.program_sha256,
             "entry_point": job.entry_point,
-            "visible": [case.model_dump(mode="json") for case in job.visible],
-            "hidden": [case.model_dump(mode="json") for case in job.hidden],
+            # Arguments only. The expected values stay in this process; see the module docstring.
+            "visible": [_case_arguments(case) for case in job.visible],
+            "hidden": [_case_arguments(case) for case in job.hidden],
             "limits": job.limits.model_dump(mode="json"),
             "jail": str(jail.resolve()),
         }
@@ -257,7 +300,7 @@ class LocalSandbox:
         stderr: bytes,
     ) -> Verdict:
         try:
-            raw = json.loads(result_path.read_text(encoding="utf-8"))
+            raw = _read_result_file(result_path)
         except (OSError, ValueError) as exc:
             return self._verdict(
                 job,
@@ -284,15 +327,15 @@ class LocalSandbox:
         assert isinstance(raw, dict)  # noqa: S101  # nosec B101
         status: VerdictStatus = raw["status"]
         try:
-            visible = _results(raw.get("visible", []))
-            hidden = _results(raw.get("hidden", []))
+            visible = _graded(raw.get("visible", []), job.visible)
+            hidden = _graded(raw.get("hidden", []), job.hidden)
         except (ValueError, TypeError) as exc:
             return self._verdict(
                 job,
                 status="crashed",
                 duration=duration,
                 exit_code=exit_code,
-                detail=f"malformed test results: {type(exc).__name__}",
+                detail=f"malformed case outcomes: {type(exc).__name__}",
                 stdout=stdout,
                 stderr=stderr,
             )

@@ -12,10 +12,18 @@ message is attacker-controlled once a real model writes the candidates. None of 
 ``VisibleFeedback``: a test result carries a name, a status and an exception *class name* matching
 ``^[A-Za-z_][A-Za-z0-9_]{0,63}$``, nothing else. Free text from a run is kept on ``Verdict.detail``
 for operators, redacted and truncated, and never sent to a model.
+
+**Outputs vs grades.** The sandbox child is sent each case's *arguments* and reports back the entry
+point's own output (:class:`CaseOutcome`); :func:`grade_group` turns those outputs into
+:class:`TestResult` rows here, in the parent. That split exists because the child shares an
+interpreter with the candidate, so anything the child knows the candidate can read - and a child
+that knew the expected values handed a frame-walking program a free pass on the hidden tests.
 """
 
 from __future__ import annotations
 
+import json
+from collections.abc import Sequence
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -25,6 +33,8 @@ from verifier_guided_search.tasks.models import TestCase
 
 __all__ = [
     "ERROR_CLASS_PATTERN",
+    "MAX_OUTPUT_JSON_CHARS",
+    "CaseOutcome",
     "ExecJob",
     "ExecLimits",
     "GroupResult",
@@ -33,10 +43,15 @@ __all__ = [
     "Verdict",
     "VerdictStatus",
     "VisibleFeedback",
+    "grade_group",
 ]
 
 ERROR_CLASS_PATTERN = r"^[A-Za-z_][A-Za-z0-9_]{0,63}$"
 TestStatus = Literal["pass", "fail", "error"]
+CaseOutcomeKind = Literal["returned", "error", "unrepresentable"]
+#: Cap on the JSON one call may report. Mirrors ``sandbox.child.MAX_OUTPUT_CHARS``; a candidate does
+#: not get to make the parent parse an unbounded document.
+MAX_OUTPUT_JSON_CHARS = 4096
 VerdictStatus = Literal[
     "ok",
     "syntax_error",
@@ -110,6 +125,23 @@ class TestResult(_Frozen):
     error_class: str | None = Field(default=None, pattern=ERROR_CLASS_PATTERN)
 
 
+class CaseOutcome(_Frozen):
+    """What the child observed for one case: an output, an exception class, or neither.
+
+    Deliberately not a grade. ``output_json`` is the JSON text of whatever the entry point returned,
+    bounded so a candidate cannot make the parent parse a huge document, and it is parsed only in
+    :func:`grade_group`.
+    """
+
+    __test__ = False
+
+    name: str = Field(min_length=1, max_length=64)
+    outcome: CaseOutcomeKind
+    output_json: str = Field(default="", max_length=MAX_OUTPUT_JSON_CHARS)
+    error_class: str | None = Field(default=None, pattern=ERROR_CLASS_PATTERN)
+    reason: str | None = Field(default=None, pattern=r"^[a-z_]{1,32}$")
+
+
 class GroupResult(_Frozen):
     results: tuple[TestResult, ...] = ()
 
@@ -143,6 +175,47 @@ class GroupResult(_Frozen):
             if item.error_class is not None:
                 counts[item.error_class] = counts.get(item.error_class, 0) + 1
         return counts
+
+
+def _as_json_value(value: object) -> object:
+    """Tuples to lists, so an expectation built in Python compares with JSON off the wire."""
+    if isinstance(value, (list, tuple)):
+        return [_as_json_value(item) for item in value]
+    if isinstance(value, dict):
+        return {str(key): _as_json_value(item) for key, item in value.items()}
+    # Everything else is already a JSON scalar; pydantic validated it as one.
+    return value
+
+
+def grade_group(cases: Sequence[TestCase], rows: Sequence[CaseOutcome]) -> GroupResult:
+    """Grade one group in the parent: compare each reported output with its expected value.
+
+    Raises :class:`ValueError` when the rows do not line up with the cases one-for-one and in order.
+    A child that reports the wrong number of rows, or renames one, has produced an unusable result
+    rather than a passing one - the caller turns that into a ``crashed`` verdict.
+    """
+    if len(rows) != len(cases):
+        raise ValueError(f"expected {len(cases)} case outcomes, got {len(rows)}")
+    results: list[TestResult] = []
+    for case, row in zip(cases, rows, strict=True):
+        if row.name != case.name:
+            raise ValueError(f"case outcome {row.name!r} does not match case {case.name!r}")
+        if row.outcome == "error":
+            results.append(TestResult(name=case.name, status="error", error_class=row.error_class))
+            continue
+        if row.outcome != "returned":
+            # Unrepresentable: a set, an object, a non-finite float, something too deep or too
+            # large. It cannot equal a JSON expectation, so it is a plain failure.
+            results.append(TestResult(name=case.name, status="fail"))
+            continue
+        try:
+            actual = json.loads(row.output_json)
+        except ValueError:
+            results.append(TestResult(name=case.name, status="fail"))
+            continue
+        passed = actual == _as_json_value(case.expected)
+        results.append(TestResult(name=case.name, status="pass" if passed else "fail"))
+    return GroupResult(results=tuple(results))
 
 
 class VisibleFeedback(_Frozen):

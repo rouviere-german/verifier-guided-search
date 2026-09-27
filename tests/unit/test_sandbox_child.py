@@ -3,8 +3,8 @@
 The harness normally runs in a subprocess, so an integration test can only see its verdicts. These
 tests import it directly and check the pieces the verdict depends on: the deny-list is complete for
 the categories it claims to cover, the jail check resolves paths rather than comparing strings, the
-result writer writes once, and a candidate's result is normalised so a tuple compares equal to the
-JSON the benchmark stores.
+result writer writes once, and a candidate's return value is encoded as JSON the parent can grade
+(the child is told the arguments of each case and never the expected value).
 
 :func:`install_guard` is irreversible - an audit hook cannot be removed - so nothing here installs
 it. The hook's *behaviour* is what the escape suite measures, in a subprocess where its
@@ -27,14 +27,17 @@ from verifier_guided_search.sandbox.child import (
     EXIT_USAGE,
     JAILED_PATH_EVENTS,
     MAX_NORMALIZE_DEPTH,
+    MAX_OUTPUT_CHARS,
     ResultWriter,
     SandboxViolation,
+    Unrepresentable,
     _forms,
-    _normalize,
     _safe_class_name,
     _under,
     apply_limits,
+    encode_output,
     main,
+    opens_for_writing,
     purge_denied_modules,
     read_roots,
     run_group,
@@ -70,6 +73,42 @@ def test_the_deny_list_covers_every_way_out_the_suite_claims_to_block() -> None:
         assert event in BLOCKED_EVENTS, event
     for event in ("os.chdir", "os.listdir", "os.remove", "os.rename"):
         assert event in JAILED_PATH_EVENTS, event
+
+
+def test_every_path_argument_of_a_two_path_event_is_checked() -> None:
+    """Regression: only ``args[0]`` used to be checked, so a rename's destination was never seen.
+
+    A candidate could create a file inside its jail and then ``os.rename`` or ``os.link`` it to any
+    absolute path, with a verdict of ``ok`` and no violation recorded - a write outside the jail
+    that the escape suite would have scored as a *pass*.
+    """
+    for event in ("os.rename", "os.link", "os.symlink", "shutil.move", "shutil.copyfile"):
+        assert JAILED_PATH_EVENTS[event] == (0, 1), event
+    for event in ("os.chdir", "os.listdir", "os.rmdir"):
+        assert JAILED_PATH_EVENTS[event] == (0,), event
+
+
+def test_an_os_open_with_write_flags_is_a_write_even_without_a_mode_string() -> None:
+    """Regression: ``os.open`` raises the ``open`` event with ``mode=None`` and integer flags.
+
+    Classifying that as a read sent it to the lenient read check, which accepts the standard
+    library - so ``os.open(<stdlib file>, O_WRONLY | O_CREAT)`` was an unguarded write outside the
+    jail. Pinned here as well as in the escape suite, because it is one boolean.
+    """
+    assert opens_for_writing(None, os.O_WRONLY) is True
+    assert opens_for_writing(None, os.O_WRONLY | os.O_CREAT | os.O_TRUNC) is True
+    assert opens_for_writing(None, os.O_RDWR) is True
+    assert opens_for_writing(None, os.O_APPEND | os.O_CREAT) is True
+    assert opens_for_writing(None, os.O_RDONLY) is False
+    # A mode string is authoritative when there is one: the flags of a read-only open carry
+    # platform bits (O_BINARY, O_NOINHERIT) that must never be read as a write.
+    assert opens_for_writing("rb", os.O_RDONLY) is False
+    assert opens_for_writing("r", None) is False
+    assert opens_for_writing("w", None) is True
+    assert opens_for_writing("r+b", None) is True
+    # Unclassifiable: refuse the write rather than fall through to the read check.
+    assert opens_for_writing(None, None) is True
+    assert opens_for_writing(object(), object()) is True
 
 
 def test_the_read_roots_are_the_standard_library_and_nothing_else() -> None:
@@ -189,22 +228,58 @@ def test_apply_limits_reports_what_the_platform_could_not_do() -> None:
         assert all(note.startswith("rlimit_refused:") for note in notes)
 
 
-def test_tuples_are_normalised_to_lists_so_a_result_compares_with_json() -> None:
-    assert _normalize((1, 2, 3)) == [1, 2, 3]
-    assert _normalize([(1, 2), (3,)]) == [[1, 2], [3]]
-    assert _normalize("text") == "text"
-    assert _normalize(None) is None
-    assert _normalize(1.5) == 1.5
+def test_tuples_are_encoded_as_lists_so_a_result_compares_with_json() -> None:
+    assert encode_output((1, 2, 3)) == "[1, 2, 3]"
+    assert encode_output([(1, 2), (3,)]) == "[[1, 2], [3]]"
+    assert encode_output("text") == chr(34) + "text" + chr(34)
+    assert encode_output(None) == "null"
+    assert encode_output(1.5) == "1.5"
+    assert encode_output(True) == "true"
 
 
-def test_a_deeply_nested_result_is_truncated_rather_than_recursing_forever() -> None:
+def test_a_subclass_cannot_misreport_what_the_program_returned() -> None:
+    """The encoder extracts exact base types, so an override cannot fake an output.
+
+    ``json.dumps`` asks an int subclass for its ``__repr__``, which a candidate can override. It
+    could not use that to pass a test whose answer it does not know, but the parent is entitled to
+    be told what the program really returned.
+    """
+
+    class Sneaky(int):
+        def __repr__(self) -> str:  # pragma: no cover - the encoder never calls it
+            return "999"
+
+    assert encode_output(Sneaky(3)) == "3"
+
+    class Loud(str):
+        def __str__(self) -> str:  # pragma: no cover - the encoder never calls it
+            return "shouted"
+
+    assert encode_output(Loud("quiet")) == chr(34) + "quiet" + chr(34)
+
+
+def test_a_value_that_cannot_be_reported_is_marked_rather_than_crashing() -> None:
+    for value in (object(), {1, 2}, float("nan"), float("inf"), {(1, 2): "tuple key"}):
+        with pytest.raises(Unrepresentable):
+            encode_output(value)
+
+
+def test_a_deeply_nested_result_is_refused_rather_than_recursing_forever() -> None:
     nested: object = 1
     for _ in range(MAX_NORMALIZE_DEPTH + 5):
         nested = [nested]
-    assert "<too-deep>" in repr(_normalize(nested))
+    with pytest.raises(Unrepresentable, match="depth"):
+        encode_output(nested)
 
 
-def test_run_group_classifies_pass_fail_and_error() -> None:
+def test_an_oversized_result_is_refused() -> None:
+    with pytest.raises(Unrepresentable, match="size"):
+        encode_output("x" * (MAX_OUTPUT_CHARS + 1))
+
+
+def test_run_group_reports_outputs_and_never_a_grade() -> None:
+    """The child cannot grade: it is not told what the answers are. See the module docstring."""
+
     def function(value: int) -> int:
         if value < 0:
             raise ValueError("negative")
@@ -213,14 +288,22 @@ def test_run_group_classifies_pass_fail_and_error() -> None:
     rows = run_group(
         function,
         [
-            {"name": "t0", "args": [2], "expected": 4},
-            {"name": "t1", "args": [3], "expected": 99},
-            {"name": "t2", "args": [-1], "expected": 0},
+            {"name": "t0", "args": [2]},
+            {"name": "t1", "args": [3]},
+            {"name": "t2", "args": [-1]},
         ],
     )
-    assert [row["status"] for row in rows] == ["pass", "fail", "error"]
-    assert rows[0]["error_class"] is None
+    assert [row["outcome"] for row in rows] == ["returned", "returned", "error"]
+    assert rows[0]["output_json"] == "4"
+    assert rows[1]["output_json"] == "6"
     assert rows[2]["error_class"] == "ValueError"
+    assert not any("expected" in row or "status" in row for row in rows)
+
+
+def test_run_group_marks_a_value_it_cannot_report() -> None:
+    rows = run_group(lambda value: {value}, [{"name": "t0", "args": [1]}])
+    assert rows[0]["outcome"] == "unrepresentable"
+    assert rows[0]["reason"] == "type"
 
 
 def test_run_group_lets_a_violation_through_instead_of_recording_it_as_an_error() -> None:
@@ -228,12 +311,12 @@ def test_run_group_lets_a_violation_through_instead_of_recording_it_as_an_error(
         raise SandboxViolation("open:write")
 
     with pytest.raises(SandboxViolation):
-        run_group(escaping, [{"name": "t0", "args": [1], "expected": 1}])
+        run_group(escaping, [{"name": "t0", "args": [1]}])
 
 
 def test_run_group_handles_a_case_with_no_arguments() -> None:
-    rows = run_group(lambda: 7, [{"name": "t0", "expected": 7}])
-    assert rows[0]["status"] == "pass"
+    rows = run_group(lambda: 7, [{"name": "t0"}])
+    assert rows[0]["output_json"] == "7"
 
 
 def test_an_exception_class_name_is_always_a_safe_identifier() -> None:
@@ -354,7 +437,7 @@ def test_an_early_verdict_cancels_the_watchdog(tmp_path: Path) -> None:
                 "program": "def solve(:\n    pass\n",
                 "program_sha256": "d" * 64,
                 "entry_point": "solve",
-                "visible": [{"name": "v00", "args": [], "expected": 1}],
+                "visible": [{"name": "v00", "args": []}],
                 "hidden": [],
                 "jail": str(jail),
                 # Long enough that an armed timer would outlive the whole test session.
@@ -392,6 +475,7 @@ def test_the_harness_is_standard_library_only(repo_root: Path) -> None:
             imported.add(node.module.split(".")[0])
     allowed = {
         "json",
+        "math",
         "os",
         "sys",
         "threading",
