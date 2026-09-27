@@ -1,0 +1,102 @@
+# Local stack: a search service with an ingress port, and a runner with no way out.
+#
+# The split is the security boundary of this repo. `app` holds the credentials and talks to Claude;
+# `runner` is the only process that executes candidate programs, and it sits on a network declared
+# `internal: true`, so a program that gets past the in-process guard still has nowhere to send
+# anything. Neither service mounts the Docker socket, and no service is privileged - asserted by
+# tests/integration/test_containers.py rather than promised by this comment.
+#
+# Only locally built images; nothing is pulled at runtime besides the digest-pinned bases.
+services:
+  app:
+    build:
+      context: .
+    image: verifier-guided-search:local
+    command: ["serve"]
+    # Loopback only: this is a development stack, not an exposed service.
+    ports:
+      - "127.0.0.1:8000:8000"
+    environment:
+      APP_ENVIRONMENT: prod
+      APP_LOG_LEVEL: INFO
+      APP_HOST: 0.0.0.0
+      # Comma-separated SHA-256 digests; generate with `uv run vgs generate-api-key`.
+      APP_API_KEY_SHA256: ${APP_API_KEY_SHA256:-}
+      # The runner is reachable only by service name on the internal network.
+      APP_RUNNER_URL: http://runner:8001
+      APP_RUNNER_API_KEY: ${APP_RUNNER_API_KEY:-}
+      APP_DATA_DIR: /tmp/var
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+    networks:
+      - edge
+      - verifier
+    depends_on:
+      runner:
+        condition: service_healthy
+    user: "10001:10001"
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    mem_limit: 512m
+    cpus: 1.0
+    restart: unless-stopped
+
+  runner:
+    build:
+      context: .
+    image: verifier-guided-search:local
+    command: ["serve-runner"]
+    # No `ports`: nothing on the host can reach the process that runs untrusted code.
+    expose:
+      - "8001"
+    environment:
+      APP_ENVIRONMENT: prod
+      APP_LOG_LEVEL: INFO
+      APP_HOST: 0.0.0.0
+      APP_PORT: "8001"
+      APP_API_KEY_SHA256: ${APP_RUNNER_API_KEY_SHA256:-}
+      # The only writable path in the image, and the parent of every jail.
+      APP_RUNNER_WORKROOT: /sandbox
+      # Ceilings the caller can only ask for less than, never more.
+      APP_SANDBOX_TIMEOUT_SECONDS: "1.5"
+      APP_SANDBOX_MEMORY_BYTES: "268435456"
+      # Deliberately absent: ANTHROPIC_API_KEY and anything else a candidate could try to read.
+    networks:
+      - verifier
+    user: "10001:10001"
+    read_only: true
+    tmpfs:
+      # noexec would also stop the child interpreter, so the jail is exec-able but size-bounded;
+      # the guard and the rlimits constrain what a program can do with it.
+      - /sandbox:size=64m,mode=1777
+      - /tmp:size=16m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    # A fork bomb hits this, not the host's process table.
+    pids_limit: 64
+    mem_limit: 512m
+    cpus: 1.0
+    healthcheck:
+      test: ["CMD", "python", "-m", "verifier_guided_search.core.healthcheck"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    restart: unless-stopped
+
+networks:
+  # Ingress for the search service.
+  edge:
+    driver: bridge
+  # No egress at all: `internal: true` means the Docker daemon attaches no gateway, so a program in
+  # the runner cannot reach the internet, the host, or any other compose network.
+  verifier:
+    driver: bridge
+    internal: true
