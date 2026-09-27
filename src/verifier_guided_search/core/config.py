@@ -92,6 +92,12 @@ class Settings(BaseSettings):
     runner_max_concurrent_executions: int = Field(default=4, ge=1, le=64)
 
     # --- search API limits ---
+    #: Which candidate generator the service builds: the offline mutation operators, or the live
+    #: Claude one (which needs ANTHROPIC_API_KEY). ``vgs search --generator`` picks per run.
+    generator: str = Field(default="mutation", pattern=r"^(mutation|claude)$")
+    #: Model for the generator role. Candidate generation is the high-volume call in a search, so
+    #: this is Sonnet rather than the default Opus of ``llm_model``.
+    generator_model: str = Field(default="claude-sonnet-5", pattern=r"^[a-z0-9][a-z0-9.-]{0,63}$")
     search_max_candidates: int = Field(default=16, ge=1, le=256)
     search_default_strategy: str = Field(default="mcts", pattern=r"^[a-z_]{1,32}$")
     #: Searches allowed at once. A search is many sandbox executions plus synchronous HTTP, so it

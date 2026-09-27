@@ -128,6 +128,7 @@ Useful one-liners:
 ```bash
 uv run vgs tasks                        # list the benchmark and its content hash
 uv run vgs tasks run_length_encode/00   # one task: statement, broken program, test counts
+uv run vgs search run_length_encode/00  # one budgeted search; --generator claude for the live one
 uv run vgs escape-suite                 # run the sandbox escape suite on its own
 uv run vgs audit verify var/audit.jsonl
 uv run vgs serve                        # the search service
@@ -280,7 +281,13 @@ Honest limits, in rough order of how much they constrain what the numbers mean.
   distribution.** The offline generator enumerates single-edit neighbours of each reference solution
   and scores them with a noisy revert/introduce signal. Every mutant is syntactically valid, the
   neighbourhood is finite and local, and the reference is always reachable - none of which is true of
-  a language model. The live `claude-sonnet-5` generator has no such guarantees and needs a key.
+  a language model. The live `claude-sonnet-5` generator has no such guarantees.
+- **No numbers are reported for the live generator.** It is wired and reachable - `vgs search
+  <task> --generator claude`, or `APP_GENERATOR=claude` for the search service - and the whole path
+  is tested offline by recording a run and replaying it from a cassette
+  ([`test_live_generator.py`](tests/integration/test_live_generator.py)). But no `ANTHROPIC_API_KEY`
+  was available here, so nothing in Results comes from it, no cassettes of real Claude responses are
+  committed, and `tasks.py record` is still a stub rather than a recording workflow.
 - **best-of-N is measured over that same edit space, which under-represents it.** Here "one sample"
   is one edit from the current program, so best-of-N is confined to depth 1 and structurally cannot
   repair a two-edit bug. Real best-of-N samples whole programs. The result in the table is correct
@@ -306,8 +313,8 @@ Honest limits, in rough order of how much they constrain what the numbers mean.
   axis is therefore verifier calls; token and sandbox-second spend are reported alongside.
 - **Not implemented:** the spec's `EXPERIMENTS.md`-generating script covers the sweep, ablations,
   value model and escape suite, but there is no OpenTelemetry span per expansion (only the HTTP
-  spans the baseline provides), no live-generator cassettes, and no distributed or parallel search.
-  Executions are serial by design on a 2 GB CPU-only host.
+  spans the baseline provides), and no distributed or parallel search. Executions are serial by
+  design on a 2 GB CPU-only host.
 - **The container controls are verified by reading the declarations**, not by starting Docker. A
   separate CI job (`.github/workflows/ci.yml#sandbox-escape`) runs the escape suite inside compose on
   a Linux runner.

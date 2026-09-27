@@ -17,6 +17,13 @@ strategies separate. Priors come from rank, not from the noisy score.
 search, and the spec's architecture names Sonnet for it. Every returned program is re-parsed here
 before it becomes a candidate, so a malformed response costs one expansion rather than poisoning
 the tree.
+
+:func:`build_generator` is how either of them is chosen at run time: ``APP_GENERATOR`` for the
+search service, ``--generator`` for ``vgs search``. It exists because the live generator was
+previously reachable only from its own unit tests - nothing in the CLI or the service built it - so
+"implemented" and "usable" were not the same thing. It refuses ``claude`` without a key rather than
+failing on the first expansion, and the Anthropic SDK is imported inside it so every offline path
+stays SDK-free.
 """
 
 from __future__ import annotations
@@ -26,7 +33,7 @@ import math
 import random
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from verifier_guided_search.agentic.errors import ProviderError
 from verifier_guided_search.agentic.providers.base import LLMProvider, LLMRequest
@@ -43,14 +50,19 @@ from verifier_guided_search.search.prompting import (
 from verifier_guided_search.search.puct import rank_priors
 from verifier_guided_search.tasks.models import Task
 
+if TYPE_CHECKING:  # pragma: no cover - import only for typing, never at run time
+    from verifier_guided_search.core.config import Settings
+
 __all__ = [
     "DEFAULT_NOISE",
     "GENERATOR_MODEL",
+    "GENERATOR_NAMES",
     "Candidate",
     "CandidateGenerator",
     "ClaudeGenerator",
     "Generation",
     "MutationGenerator",
+    "build_generator",
 ]
 
 #: Calibrated so greedy, best-of-N, beam and MCTS separate on the benchmark; see ADR 0003.
@@ -59,6 +71,8 @@ DEFAULT_REVERT_ADVANTAGE = 1.0
 DEFAULT_INTRODUCE_ADVANTAGE = 0.25
 DEFAULT_PRIOR_TEMPERATURE = 1.5
 GENERATOR_MODEL = "claude-sonnet-5"
+#: The names :func:`build_generator` accepts, which is also the CLI's and the settings' vocabulary.
+GENERATOR_NAMES = ("mutation", "claude")
 _MAX_OUTPUT_TOKENS_PER_CANDIDATE = 700
 _OFFLINE_MODEL = "fake-mutation"
 
@@ -275,6 +289,45 @@ def _loads(text: str) -> object:
         return json.loads(text)
     except ValueError:
         return None
+
+
+def build_generator(
+    name: str,
+    *,
+    settings: Settings | None = None,
+    provider: LLMProvider | None = None,
+    seed: int = 7,
+    noise: float = DEFAULT_NOISE,
+) -> CandidateGenerator:
+    """The generator named ``name``: the offline mutation one, or the live Claude one.
+
+    ``provider`` is for tests and replays - pass a :class:`ReplayProvider` and the live generator
+    runs offline against a cassette. Without one, ``claude`` builds an
+    :class:`~verifier_guided_search.agentic.providers.anthropic.AnthropicProvider` from ``settings``
+    and refuses up front if there is no key, because a search that dies on its first expansion is
+    worse than one that never starts.
+    """
+    if name == "mutation":
+        return MutationGenerator(seed=seed, noise=noise)
+    if name != "claude":
+        raise SearchError(f"unknown generator {name!r}; expected one of {GENERATOR_NAMES}")
+    if provider is None:
+        from verifier_guided_search.agentic.providers.anthropic import (  # noqa: PLC0415
+            AnthropicProvider,
+        )
+        from verifier_guided_search.core.config import get_settings  # noqa: PLC0415
+
+        cfg = settings if settings is not None else get_settings()
+        if cfg.anthropic_api_key is None:
+            raise SearchError(
+                "the claude generator needs ANTHROPIC_API_KEY; "
+                "the offline mutation generator needs nothing"
+            )
+        provider = AnthropicProvider.from_settings(
+            cfg, role_models={GENERATOR_ROLE: cfg.generator_model}
+        )
+    model = settings.generator_model if settings is not None else GENERATOR_MODEL
+    return ClaudeGenerator(provider, model=model)
 
 
 def token_budget_for(generator: CandidateGenerator, *, expansions: int, k: int) -> int:

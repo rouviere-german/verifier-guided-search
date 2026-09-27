@@ -54,7 +54,11 @@ from verifier_guided_search.sandbox.client import CachingSandbox, HttpSandbox, S
 from verifier_guided_search.sandbox.local import LocalSandbox
 from verifier_guided_search.sandbox.protocol import ExecLimits
 from verifier_guided_search.search.budget import BudgetAccountant, BudgetSpec
-from verifier_guided_search.search.generator import MutationGenerator, token_budget_for
+from verifier_guided_search.search.generator import (
+    CandidateGenerator,
+    build_generator,
+    token_budget_for,
+)
 from verifier_guided_search.search.strategies import (
     STRATEGIES,
     SearchConfig,
@@ -162,6 +166,7 @@ def create_search_app(
     *,
     suite: TaskSuite | None = None,
     sandbox: SandboxClient | None = None,
+    generator: CandidateGenerator | None = None,
     value_model: GradientBoostedValueModel | None = None,
     registry: CollectorRegistry | None = None,
     metrics: SearchMetrics | None = None,
@@ -172,7 +177,7 @@ def create_search_app(
     tasks = suite if suite is not None else default_suite()
     verifier = sandbox if sandbox is not None else build_sandbox(cfg, metrics=search_metrics)
     model = value_model if value_model is not None else _load_quietly(cfg)
-    generator = MutationGenerator()
+    engine = generator if generator is not None else build_generator(cfg.generator, settings=cfg)
     limiter = ConcurrencyLimiter(cfg.search_max_concurrent_searches, name="search")
 
     def routes(app: FastAPI) -> None:
@@ -198,9 +203,7 @@ def create_search_app(
             accountant = BudgetAccountant(
                 BudgetSpec.of(
                     candidates=cap,
-                    tokens=token_budget_for(
-                        generator, expansions=cap, k=body.children_per_expansion
-                    ),
+                    tokens=token_budget_for(engine, expansions=cap, k=body.children_per_expansion),
                     sandbox_seconds=cap * cfg.sandbox_timeout_seconds * _SANDBOX_SLACK,
                     usd=_USD_CAP,
                 )
@@ -210,7 +213,7 @@ def create_search_app(
                     task,
                     SearchContext(
                         sandbox=verifier,
-                        generator=generator,
+                        generator=engine,
                         accountant=accountant,
                         config=config,
                         value_model=model if body.use_value_model else None,
@@ -258,6 +261,7 @@ def create_search_app(
         routes=routes,
     )
     app.state.sandbox = verifier
+    app.state.generator = engine
     app.state.limiter = limiter
     app.state.value_model = model
     app.state.suite = tasks

@@ -4,6 +4,7 @@ verifier_guided_search``.
 Subcommands:
 
 ``demo``             the offline end-to-end demo (no API key, no Docker, no network)
+``search``           one budgeted search over one benchmark task, offline or with the live generator
 ``serve``            the search service
 ``serve-runner``     the sandbox runner service (what the runner container runs)
 ``tasks``            list the benchmark, or print one task
@@ -13,6 +14,11 @@ Subcommands:
 
 Heavy imports (uvicorn, the app factories, scikit-learn) happen inside the subcommand that needs
 them, so ``--help`` and ``tasks`` stay instant and the offline paths never import the Anthropic SDK.
+
+``search`` exists because ``ClaudeGenerator`` had no caller outside its own unit tests: the demo,
+the bench and the service all hard-wired the offline mutation generator, so a key bought nothing.
+``vgs search TASK --generator claude`` is the live path; ``--generator mutation`` (the default) is
+the same code path offline.
 """
 
 from __future__ import annotations
@@ -22,7 +28,9 @@ import json
 import sys
 from pathlib import Path
 
-__all__ = ["main"]
+from verifier_guided_search.search.generator import GENERATOR_NAMES
+
+__all__ = ["build_parser", "main"]
 
 
 def _serve_search(host: str | None, port: int | None) -> int:
@@ -111,6 +119,113 @@ def _tasks(task_id: str | None, instances: int) -> int:
     return 0
 
 
+def _search(
+    task_id: str,
+    *,
+    strategy: str,
+    candidates: int,
+    children: int,
+    generator_name: str,
+    use_value_model: bool,
+    workdir: Path | None,
+) -> int:
+    """Run one budgeted search and print what it committed to, as JSON."""
+    import tempfile  # noqa: PLC0415
+
+    from verifier_guided_search.errors import SearchError  # noqa: PLC0415
+    from verifier_guided_search.sandbox.client import CachingSandbox  # noqa: PLC0415
+    from verifier_guided_search.sandbox.local import LocalSandbox  # noqa: PLC0415
+    from verifier_guided_search.sandbox.protocol import ExecLimits  # noqa: PLC0415
+    from verifier_guided_search.search.budget import (  # noqa: PLC0415
+        BudgetAccountant,
+        BudgetSpec,
+    )
+    from verifier_guided_search.search.generator import (  # noqa: PLC0415
+        build_generator,
+        token_budget_for,
+    )
+    from verifier_guided_search.search.strategies import (  # noqa: PLC0415
+        STRATEGIES,
+        SearchConfig,
+        SearchContext,
+        run_search,
+    )
+    from verifier_guided_search.tasks.suite import build_suite  # noqa: PLC0415
+
+    if strategy not in STRATEGIES:
+        print(
+            f"unknown strategy {strategy!r}; expected one of {sorted(STRATEGIES)}", file=sys.stderr
+        )
+        return 2
+    suite = build_suite(instances_per_family=10)
+    try:
+        task = suite.get(task_id)
+    except KeyError:
+        print(f"unknown task {task_id!r}; list them with 'vgs tasks'", file=sys.stderr)
+        return 2
+    try:
+        generator = build_generator(generator_name)
+    except SearchError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+
+    def run(root: Path) -> int:
+        limits = ExecLimits()
+        accountant = BudgetAccountant(
+            BudgetSpec.of(
+                candidates=candidates,
+                tokens=token_budget_for(generator, expansions=candidates, k=children),
+                sandbox_seconds=candidates * limits.timeout_seconds * 4.0,
+                usd=1.0,
+            )
+        )
+        outcome = run_search(
+            task,
+            SearchContext(
+                sandbox=CachingSandbox(LocalSandbox(root)),
+                generator=generator,
+                accountant=accountant,
+                config=SearchConfig(
+                    strategy=strategy,
+                    children_per_expansion=children,
+                    use_value_model=use_value_model,
+                    limits=limits,
+                ),
+                actor=f"cli:{generator_name}",
+            ),
+        )
+        answer = outcome.answer
+        print(
+            json.dumps(
+                {
+                    "task_id": task.task_id,
+                    "family": task.family,
+                    "strategy": strategy,
+                    "generator": generator_name,
+                    "model": generator.model,
+                    "stop_reason": outcome.stop_reason,
+                    "evaluations": len(outcome.evaluations),
+                    "nodes": outcome.nodes,
+                    "expansions": outcome.expansions,
+                    "solved_visible": bool(answer is not None and answer.solved_visible),
+                    # Reported, never seen by the search: the hidden group grades the answer it
+                    # had already committed to.
+                    "solved_hidden": bool(answer is not None and answer.solved_hidden),
+                    "false_pass": bool(answer is not None and answer.false_pass),
+                    "usage": accountant.committed.as_dict(),
+                    "generator_token_overshoot": accountant.generator_token_overshoot,
+                },
+                indent=2,
+            )
+        )
+        return 0
+
+    if workdir is not None:
+        return run(workdir)
+    with tempfile.TemporaryDirectory(prefix="vgs-search-") as tmp:
+        return run(Path(tmp))
+
+
 def _escape_suite(workdir: Path | None) -> int:
     import tempfile  # noqa: PLC0415
 
@@ -141,7 +256,8 @@ def _escape_suite(workdir: Path | None) -> int:
         return run(Path(tmp))
 
 
-def main(argv: list[str] | None = None) -> int:
+def build_parser() -> argparse.ArgumentParser:
+    """The whole command line, in one place so ``main`` stays a dispatch table."""
     parser = argparse.ArgumentParser(prog="verifier-guided-search")
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -168,13 +284,31 @@ def main(argv: list[str] | None = None) -> int:
     escape = sub.add_parser("escape-suite", help="run the sandbox escape suite")
     escape.add_argument("--workdir", type=Path, default=None)
 
+    one = sub.add_parser("search", help="run one budgeted search over one benchmark task")
+    one.add_argument("task_id")
+    one.add_argument("--strategy", default="mcts")
+    one.add_argument("--candidates", type=int, default=16, help="the candidate budget")
+    one.add_argument("--children", type=int, default=4, help="children per expansion (k)")
+    one.add_argument(
+        "--generator",
+        choices=GENERATOR_NAMES,
+        default="mutation",
+        help="mutation is offline; claude needs ANTHROPIC_API_KEY",
+    )
+    one.add_argument("--no-value-model", action="store_true")
+    one.add_argument("--workdir", type=Path, default=None)
+
     demo = sub.add_parser("demo", help="run the offline end-to-end demo")
     demo.add_argument("--workdir", type=Path, default=None)
     demo.add_argument("--instances-per-family", type=int, default=1)
     demo.add_argument("--no-approve", action="store_true")
     demo.add_argument("--json", action="store_true")
 
-    args = parser.parse_args(argv)
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
     if args.command == "serve":
         return _serve_search(args.host, args.port)
     if args.command == "serve-runner":
@@ -197,6 +331,16 @@ def main(argv: list[str] | None = None) -> int:
         return _tasks(args.task_id, args.instances_per_family)
     if args.command == "escape-suite":
         return _escape_suite(args.workdir)
+    if args.command == "search":
+        return _search(
+            args.task_id,
+            strategy=args.strategy,
+            candidates=args.candidates,
+            children=args.children,
+            generator_name=args.generator,
+            use_value_model=not args.no_value_model,
+            workdir=args.workdir,
+        )
 
     from verifier_guided_search.demo import main as demo_main  # noqa: PLC0415
 

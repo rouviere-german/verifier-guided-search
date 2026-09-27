@@ -37,6 +37,7 @@ def test_help_lists_every_subcommand(capsys: pytest.CaptureFixture[str]) -> None
         "audit",
         "tasks",
         "escape-suite",
+        "search",
         "demo",
     ):
         assert command in out
@@ -149,3 +150,48 @@ def test_the_console_scripts_point_at_the_cli(repo_root: Path) -> None:
     scripts = data["project"]["scripts"]
     assert scripts["verifier-guided-search"] == "verifier_guided_search.cli:main"
     assert scripts["vgs"] == "verifier_guided_search.cli:main"
+
+
+@pytest.mark.sandbox
+def test_search_runs_one_budgeted_search_and_prints_what_it_committed_to(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """``vgs search`` is the entry point the live generator was missing. Offline: mutation."""
+    assert (
+        main(
+            [
+                "search",
+                "run_length_encode/00",
+                "--strategy",
+                "beam",
+                "--candidates",
+                "4",
+                "--workdir",
+                str(tmp_path / "search"),
+            ]
+        )
+        == 0
+    )
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["task_id"] == "run_length_encode/00"
+    assert payload["generator"] == "mutation"
+    assert payload["model"] == "fake-mutation"
+    assert payload["evaluations"] <= 4
+    assert payload["usage"]["candidates"] == payload["evaluations"]
+    assert set(payload) >= {"solved_visible", "solved_hidden", "false_pass", "stop_reason"}
+
+
+def test_search_refuses_an_unknown_task_or_strategy(capsys: pytest.CaptureFixture[str]) -> None:
+    assert main(["search", "nope/00"]) == 2
+    assert "unknown task" in capsys.readouterr().err
+    assert main(["search", "run_length_encode/00", "--strategy", "telepathy"]) == 2
+    assert "unknown strategy" in capsys.readouterr().err
+
+
+def test_search_refuses_the_live_generator_without_a_key(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A missing key is a clear refusal before any work, not a failure mid-search."""
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    assert main(["search", "run_length_encode/00", "--generator", "claude"]) == 2
+    assert "ANTHROPIC_API_KEY" in capsys.readouterr().err
