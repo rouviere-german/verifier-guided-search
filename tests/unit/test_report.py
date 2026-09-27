@@ -17,9 +17,12 @@ from verifier_guided_search.experiments.report import (
     render_compute_to_target,
     render_escape_suite,
     render_experiments_document,
+    render_false_pass_detail,
     render_solve_rate_table,
+    render_start_classification,
     render_summary_lines,
     render_value_model_card,
+    render_verifier_gap,
 )
 from verifier_guided_search.experiments.sweep import LevelStats, SweepConfig, SweepResults
 from verifier_guided_search.experiments.train import TrainedValueModel, ValueModelMetrics
@@ -29,6 +32,7 @@ from verifier_guided_search.sandbox.protocol import (
     TestResult,
     Verdict,
 )
+from verifier_guided_search.tasks.validate import StartKind, SuiteReport, TaskStart
 from verifier_guided_search.value.model import constant_value_model
 
 pytestmark = pytest.mark.unit
@@ -271,6 +275,7 @@ def test_the_whole_document_is_assembled_with_every_section(
     rows = (AblationRow(knob="c_puct", value="1.4", stats=level("mcts", 8, hidden=0.3)),)
     document = render_experiments_document(
         results,
+        value_model_off=results,
         ablations=AblationResults(
             suite_sha256=_SUITE_HASH, task_count=11, candidates_budget=8, rows=rows
         ),
@@ -285,6 +290,7 @@ def test_the_whole_document_is_assembled_with_every_section(
         "## Hidden-test solve rate against budget",
         "## Compute to reach the target solve rate",
         "## Value model",
+        "### The same sweep with the value model off",
         "## Ablations",
     ):
         assert heading in document
@@ -296,6 +302,7 @@ def test_the_whole_document_is_assembled_with_every_section(
 
 def test_the_document_omits_sections_it_has_no_data_for(results: SweepResults) -> None:
     document = render_experiments_document(results)
+    assert "value model off" not in document
     assert "## Value model" not in document
     assert "## Ablations" not in document
     assert "## Sandbox escape suite" not in document
@@ -308,3 +315,98 @@ def test_an_empty_escape_run_is_omitted_rather_than_reported_as_zero(
     """Reporting "0% blocked" for a suite that never ran would be worse than saying nothing."""
     document = render_experiments_document(results, escape=[])
     assert "## Sandbox escape suite" not in document
+
+
+def test_the_false_pass_section_names_the_tasks_rather_than_only_a_rate() -> None:
+    """A rate alone reads as "search keeps finding new wrong answers"; the ids show otherwise."""
+    config = SweepConfig(
+        seed=1, instances_per_family=2, strategies=("beam", "mcts"), budget_levels=(4, 16)
+    )
+    fooled = ("balanced_brackets/01", "normalize_spacing/00")
+    levels = (
+        level("beam", 4, hidden=0.3, visible=0.5, false_pass=0.2),
+        level("beam", 16, hidden=0.7, visible=0.9, false_pass=0.2).model_copy(
+            update={"false_pass_task_ids": fooled}
+        ),
+        level("mcts", 4, hidden=0.3, visible=0.5, false_pass=0.2),
+        level("mcts", 16, hidden=0.6, visible=0.8, false_pass=0.2).model_copy(
+            update={"false_pass_task_ids": fooled[:1]}
+        ),
+    )
+    results = SweepResults(
+        config=config,
+        suite_sha256=_SUITE_HASH,
+        task_count=18,
+        family_count=11,
+        generator="mutation",
+        generator_model="fake-mutation",
+        levels=levels,
+        total_evaluations=100,
+        total_sandbox_seconds=10.0,
+        wall_seconds=10.0,
+        cache_hit_ratio=0.5,
+    )
+    rendered = render_false_pass_detail(results)
+    assert "`balanced_brackets/01`" in rendered
+    assert "`normalize_spacing/00`" in rendered
+    assert "budget 16" in rendered
+
+
+def test_the_verifier_gap_sentence_is_computed_not_written() -> None:
+    """Regression: the README said "17-27 points" while no row exceeded 22.2."""
+    config = SweepConfig(
+        seed=1, instances_per_family=2, strategies=("mcts",), budget_levels=(1, 4, 16)
+    )
+    levels = (
+        level("mcts", 1, hidden=0.1, visible=0.2),
+        level("mcts", 4, hidden=0.3, visible=0.5),
+        level("mcts", 16, hidden=0.6, visible=0.75),
+    )
+    results = SweepResults(
+        config=config,
+        suite_sha256=_SUITE_HASH,
+        task_count=18,
+        family_count=11,
+        generator="mutation",
+        generator_model="fake-mutation",
+        levels=levels,
+        total_evaluations=100,
+        total_sandbox_seconds=10.0,
+        wall_seconds=10.0,
+        cache_hit_ratio=0.5,
+    )
+    sentence = render_verifier_gap(results)
+    # 15.0-20.0 at budgets 4 and 16; 10.0-10.0 at budget 1. Nothing invented.
+    assert "15.0-20.0 points at budget 4 and above" in sentence
+    assert "10.0-10.0 points below it" in sentence
+    assert "3 (strategy, budget) rows" in sentence
+
+
+def test_the_start_classification_reports_both_awkward_classes() -> None:
+    report = SuiteReport(
+        starts=(
+            start("broken_one/00", "broken"),
+            start("balanced_brackets/01", "root_false_pass"),
+            start("free_win/00", "trivial"),
+        )
+    )
+    rendered = render_start_classification(report)
+    assert "`balanced_brackets/01`" in rendered
+    assert "`free_win/00`" in rendered
+    assert "33.3%" in rendered
+
+
+def start(task_id: str, kind: StartKind) -> TaskStart:
+    """One classified start program, with counts consistent with its class."""
+    visible_passed = 3 if kind in {"trivial", "root_false_pass"} else 1
+    hidden_passed = 3 if kind == "trivial" else 1
+    return TaskStart(
+        task_id=task_id,
+        family=task_id.split("/", maxsplit=1)[0],
+        kind=kind,
+        status="ok",
+        visible_passed=visible_passed,
+        visible_total=3,
+        hidden_passed=hidden_passed,
+        hidden_total=3,
+    )

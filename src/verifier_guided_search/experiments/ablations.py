@@ -10,16 +10,22 @@ comparable:
     degenerates into a greedy descent over the value model and the tree stops widening. Large values
     ignore the value model and spread visits by prior alone.
 
-    **Only the ``0`` versus ``> 0`` contrast is identifiable with the value model on.** The PUCT
-    score is ``Q + c * P * sqrt(N) / (1 + n)``, so when ``Q`` is equal across siblings the argmax
-    reduces to ``P / (1 + n)`` and every positive ``c`` produces the *same* ordering. This value
-    model is saturated - it scores almost every candidate ~0.0001 - so ``Q`` is effectively constant
-    and the positive rows are mechanically identical, which the results file shows directly: the
-    ``0.7``, ``1.4`` and ``2.8`` rows agree to sixteen significant figures in
-    ``mean_sandbox_seconds``, i.e. they ran the same programs in the same order. That is a stronger
-    statement than "exploration does not help", and it is the reason the grid is also swept with
-    ``use_value_model=False`` (knob ``c_puct_value_model_off``), where ``Q`` is the graded visible
-    pass fraction, siblings differ, and the exploration constant really does change the argmax.
+    **Only the ``0`` versus ``> 0`` contrast is identifiable here, and that is arithmetic, not a
+    finding.** The PUCT score is ``Q + c * P * sqrt(N) / (1 + n)``: whenever ``Q`` is equal across
+    the siblings being compared, the argmax reduces to ``P / (1 + n)`` and the constant cancels, so
+    every positive ``c`` selects the same child. Ties in ``Q`` are the normal case here, from both
+    directions - the value model is saturated (it scores almost every candidate ~0.0001), and with
+    the model off ``Q`` is a pass fraction with four or five possible values.
+
+    The results file shows the consequence rather than leaving it as an argument. With the value
+    model on, the ``0.7`` and ``1.4`` rows agree to sixteen significant figures in both
+    ``mean_sandbox_seconds`` and ``mean_generator_tokens``: the same programs, in the same order.
+    ``2.8`` differs slightly in spend and still lands on the same solve counts. With the model off
+    (knob ``c_puct_value_model_off``) the three positive values do produce different token spend -
+    ``Q`` is graded, so the constant does sometimes change the argmax - and the solve counts still
+    coincide, on 11 tasks with intervals wide enough to contain each other several times over. So
+    what the ablation supports is "exploration on or off matters here; how much of it, this sample
+    cannot say", and nothing stronger.
 ``children_per_expansion`` (k)
     How many candidates an expansion asks for. Small k means more expansions per candidate, which
     costs tokens; large k means a wide, shallow tree. With the candidate budget fixed, k trades tree

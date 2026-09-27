@@ -25,11 +25,25 @@ uv sync --frozen
 | `lint` | `ruff check` and `ruff format --check` |
 | `format` | `ruff format` and `ruff check --fix` |
 | `typecheck` | `mypy --strict` over src, tests, scripts, bench and tasks.py |
-| `test` | pytest with branch coverage; fails below 85% |
-| `bench` | benchmarks with regression thresholds from `bench/thresholds.json` |
+| `test` | pytest with branch coverage; fails below 85% (see the blind spot below) |
+| `bench` | micro-benchmarks and the evaluation, against `bench/thresholds.json` and `bench/thresholds_search.json` |
+| `calibrate` | the two benchmark difficulty dials, against `bench/thresholds_calibration.json` |
 | `demo` | the offline demo (no API key) |
 | `audit` | bandit and pip-audit |
 | `baseline` | `scripts/check_baseline.py` |
+
+### One blind spot in the coverage figure
+
+`src/verifier_guided_search/sandbox/child.py` is copied out and executed by a separate interpreter as
+`python -I -S -B`. `-S` skips `site`, so coverage's subprocess startup hook never runs and not one
+line of the harness is counted, however hard the tests exercise it. Instrumenting it would mean
+handing the sandboxed interpreter its environment and its site-packages back, which is the hardening
+the file exists for, so the trade is not worth making. Consequences when reading the report: the
+number for that file is the lowest in the repo and understates it, the repo-wide number slightly
+overstates everything else, and behaviour in that file is covered by
+`tests/integration/test_sandbox_escape.py` and `tests/unit/test_sandbox_child.py` rather than by a
+line count. Anything moved *out* of the harness becomes measurable, which is a reason to keep the
+harness small.
 
 ## Rules for changes
 

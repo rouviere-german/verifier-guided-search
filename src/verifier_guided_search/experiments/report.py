@@ -29,6 +29,7 @@ __all__ = [
     "render_start_classification",
     "render_summary_lines",
     "render_value_model_card",
+    "render_verifier_gap",
 ]
 
 _NA = "n/a"
@@ -81,7 +82,30 @@ def render_false_pass_detail(results: SweepResults) -> str:
         stats = results.level(strategy, top)
         ids = ", ".join(f"`{item}`" for item in stats.false_pass_task_ids) or "none"
         lines.append(f"| {strategy} | {stats.false_passes} | {ids} |")
+    lines += ["", render_verifier_gap(results)]
     return "\n".join(lines)
+
+
+def render_verifier_gap(results: SweepResults, *, split_at: int = 4) -> str:
+    """How far the visible solve rate runs above the hidden one, in points, from the data.
+
+    Rendered rather than written down because the sentence in the README used to say "17-27 points"
+    while no row in the results file exceeded 22.2, and nothing would have caught that.
+    """
+    low = [item for item in results.levels if item.candidates_budget < split_at]
+    high = [item for item in results.levels if item.candidates_budget >= split_at]
+
+    def span(rows: list[LevelStats]) -> str:
+        if not rows:
+            return _NA
+        gaps = [100 * (item.visible_solve_rate - item.hidden_solve_rate) for item in rows]
+        return f"{min(gaps):.1f}-{max(gaps):.1f} points"
+
+    rows = len(results.config.strategies) * len(results.config.budget_levels)
+    return (
+        f"Visible solve rates run above hidden ones by {span(high)} at budget {split_at} and "
+        f"above, and {span(low)} below it, over all {rows} (strategy, budget) rows."
+    )
 
 
 def render_compute_to_target(results: SweepResults) -> str:
@@ -222,6 +246,7 @@ def render_summary_lines(results: SweepResults) -> list[str]:
 def render_experiments_document(
     results: SweepResults,
     *,
+    value_model_off: SweepResults | None = None,
     ablations: AblationResults | None = None,
     trained: TrainedValueModel | None = None,
     escape: Sequence[EscapeOutcome] | None = None,
@@ -270,6 +295,17 @@ def render_experiments_document(
     ]
     if trained is not None:
         parts += ["", "## Value model", "", render_value_model_card(trained)]
+    if value_model_off is not None:
+        parts += [
+            "",
+            "### The same sweep with the value model off",
+            "",
+            "The ablation table below answers this on a subset at a lower budget. This is the "
+            "comparison at the reported budget, on the reported tasks, which is what the README's "
+            "negative result is about.",
+            "",
+            render_solve_rate_table(value_model_off),
+        ]
     if ablations is not None:
         parts += ["", "## Ablations", "", render_ablations(ablations)]
     # An empty sequence means "not run", the same as None: render_escape_suite refuses to summarise

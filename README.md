@@ -111,10 +111,10 @@ which is what makes the export trustworthy rather than merely pickle-free.
 export UV_PROJECT_ENVIRONMENT=~/.venvs/verifier-guided-search
 uv sync
 
-uv run python tasks.py demo        # the whole thing, offline, ~90s
-uv run python tasks.py test        # 755 tests, coverage floor 85%
-uv run python tasks.py bench       # the evaluation below, ~4 minutes
-uv run python bench/bench_calibration.py --check   # why the two difficulty dials are where they are
+uv run python tasks.py demo        # the whole thing, offline, ~2 minutes
+uv run python tasks.py test        # 812 passing, 2 environment-skipped, coverage floor 85%
+uv run python tasks.py bench       # the micro-benchmarks and the evaluation below, ~3 minutes
+uv run python tasks.py calibrate   # why the two difficulty dials are where they are, ~90s
 uv run python tasks.py lint typecheck audit baseline
 ```
 
@@ -139,8 +139,9 @@ uv run vgs serve-runner                 # the sandbox runner (what the runner co
 ## Results
 
 Produced by `uv run python bench/bench_search.py --check --write-docs` on
-Windows-10-10.0.19045-SP0, 6 CPUs, Python 3.12.14, CPU-only, in **147 seconds**. Full tables,
-ablations and provenance: [docs/EXPERIMENTS.md](docs/EXPERIMENTS.md); raw JSON:
+Windows-10-10.0.19045-SP0, 6 CPUs, Python 3.12.14, CPU-only, in **147 seconds** (232s of sandbox time
+across 630 evaluations; the difference is the verdict cache). Full tables, ablations, the start
+classification and provenance: [docs/EXPERIMENTS.md](docs/EXPERIMENTS.md); raw JSON:
 `bench/results/search.json`.
 
 The benchmark is 30 tasks from 15 families. 12 are spent collecting value-model training traces and
@@ -177,16 +178,32 @@ gets going. Two mechanisms explain that, and both are asserted as tests rather t
 ### Verifier false-pass rate
 
 **22.2% of tasks** at budget 4 and above, for all four strategies: the search satisfied every visible
-test and the hidden tests then failed. Visible solve rates run 17-27 points above hidden ones. This
-is the number the two-group benchmark exists to produce, and it does not shrink as the budget grows -
-more search finds more programs that pass the tests it can see, at roughly the same wrongness rate.
+test and the hidden tests then failed. This is the number the two-group benchmark exists to produce.
+Visible solve rates run 16.7-22.2 points above hidden ones at budget 4 and above, and 5.6-11.1 points
+below it - a sentence the report renders from the results file
+([`render_verifier_gap`](src/verifier_guided_search/experiments/report.py)), because the earlier
+hand-written version said "17-27 points" while no row in the file exceeded 22.2.
+
+It does not shrink as the budget grows, and the reason is not that search keeps producing new wrong
+answers. The set of tasks whose visible suite a wrong program can satisfy is fixed and small. Beam,
+MCTS and best-of-N are fooled on the *same four tasks* - two instances of `balanced_brackets` and two
+of `normalize_spacing`, 2 of the 11 reported families - while finding 16, 14 and 5 visible solves
+respectively; greedy is fooled on four as well, three of them the same. And one of those tasks,
+`balanced_brackets/01`, starts out already passing every visible test and failing a hidden one, so it
+is a false pass for every strategy at every budget with no search at all. The per-strategy task ids
+are printed in [docs/EXPERIMENTS.md](docs/EXPERIMENTS.md), so this is checkable rather than asserted.
 
 ### Value model
 
-- held-out AUC **0.952**, ECE 0.081, from 169 trace rows over 12 tasks disjoint from the 18 reported
+- held-out AUC **0.952**, ECE 0.081, trained on 57 rows from 8 trace tasks and evaluated on 24
+  rows from 4 more - 12 tasks in total, all disjoint from the 18 reported, and the holdout is
+  split by task rather than by row so two mutants of one reference cannot straddle it
 - comfortably above the 0.75 target
-- **and it does not improve the search.** The on/off ablation is flat at budget 8, and at budget 16
-  MCTS scores 61.1% with the model and 66.7% without it.
+- **and it does not improve the search.** The on/off ablation is flat at budget 8, and repeating the
+  whole reported sweep for MCTS with the model off gives **66.7% against 61.1% with it** at budget 16
+  - one task's difference, well inside the intervals, but certainly not an improvement. That
+  comparison is a measured row in `bench/results/search.json` (`sweep_value_model_off`), not an
+  aside: the ablation table runs on 12 tasks at budget 8, and the claim is about the headline.
 
 That negative result is the most interesting thing the ablations found, and the cause is visible in
 the scores: the model assigns ~0.0001 to almost every candidate and ~0.9 to a solving one. It ranks
@@ -195,11 +212,19 @@ the only thing PUCT actually needs it for. The coarse-but-graded visible pass fr
 is a better search signal than a sharp-but-collapsed probability. A calibrated or blended value
 signal is listed under Non-goals.
 
-Relatedly, the `c_puct` ablation favours **0.0** (45.5% versus 27.3% at 1.4, on 11 tasks, intervals
-heavily overlapping) - that is, no exploration at all. The default is left at the literature value of
-1.4 on purpose: retuning it on the tasks these results are reported on would be selecting on the test
-set, and the honest statement is "this benchmark prefers exploitation, on a sample too small to
-settle it".
+Relatedly, the `c_puct` ablation favours **0.0** (45.5% versus 27.3% at every positive value, on 11
+tasks, intervals heavily overlapping) - that is, no exploration at all. What that ablation can and
+cannot show is worth being precise about, because **only the `0` versus `> 0` contrast is
+identifiable here, and that is arithmetic rather than a finding.** The score is `Q + c·P·√N/(1+n)`: if
+`Q` is tied across the siblings being compared, the argmax reduces to `P/(1+n)` and the constant
+cancels. Ties are the normal case here from both directions - the value model is saturated, and with
+it off `Q` is a pass fraction with four or five possible values. The results file shows the
+consequence: with the model on, the `c_puct` 0.7 and 1.4 rows agree to sixteen significant figures in
+both `mean_sandbox_seconds` and `mean_generator_tokens`, i.e. they ran the same programs in the same
+order. The grid is therefore also swept with the value model off (`c_puct_value_model_off`), where the
+three positive values do spend differently - and still land on the same solve counts. The default is
+left at the literature value of 1.4 rather than retuned, because tuning it on the tasks these results
+are reported on would be selecting on the test set.
 
 ### Sandbox escape suite
 
@@ -228,18 +253,18 @@ wall-clock watchdog, and `pids_limit` in the container.
 | benchmark | runs | p50 (µs) | p95 (µs) |
 |---|---:|---:|---:|
 | rate_limiter_check | 20000 | 1.8 | 2.0 |
-| llm_request_sha256_10_messages | 2000 | 96.9 | 132.1 |
-| verdict_cache_hit | 5000 | 132.8 | 204.8 |
-| redact_text_1kb | 2000 | 339.1 | 451.3 |
-| mutation_render_3_sites | 500 | 493.9 | 694.1 |
-| mutation_space_build | 200 | 701.0 | 1018.5 |
-| audit_append_fsync | 200 | 8123.9 | 10230.4 |
-| audit_verify_1000_entries | 10 | 36201.9 | 38866.2 |
+| llm_request_sha256_10_messages | 2000 | 97.5 | 125.3 |
+| verdict_cache_hit | 5000 | 130.7 | 164.9 |
+| redact_text_1kb | 2000 | 339.4 | 438.5 |
+| mutation_render_3_sites | 500 | 495.9 | 679.6 |
+| mutation_space_build | 200 | 696.2 | 871.5 |
+| audit_append_fsync | 200 | 7962.7 | 9021.3 |
+| audit_verify_1000_entries | 10 | 34621.6 | 40644.5 |
 
-A sandbox execution costs ~130 **ms** - a fresh interpreter per program - so a cache hit at 133 µs is
+A sandbox execution costs ~130 **ms** - a fresh interpreter per program - so a cache hit at 131 µs is
 a thousand times cheaper, and the cache answered **57.2%** of lookups in the bench run. (The hit is
 not free: the key is `sha256(program ‖ tests ‖ limits)` and the test suite is re-hashed per lookup.
-Memoising that is an obvious optimisation and is not done, because 133 µs against 130 ms is not where
+Memoising that is an obvious optimisation and is not done, because 131 µs against 130 ms is not where
 the time goes.) The cache is a wall-clock optimisation only - the budget charges a candidate whether
 or not the cache answers, so it cannot buy extra evaluations.
 
@@ -266,7 +291,9 @@ The threat this repo is built around is that **candidate programs are untrusted 
 | Neither blocking route runs on the event loop, and each bounds its own concurrency, so one in-flight search cannot take `/healthz` down with it | `core/concurrency.py`, `api/` | [`test_the_health_probes_answer_while_an_execution_is_in_flight`](tests/integration/test_api.py) |
 
 Every claim in this file maps to a test, bench script or CI job in [CLAIMS.md](CLAIMS.md), and
-`scripts/check_baseline.py` fails if any of those references goes stale.
+`scripts/check_baseline.py` fails if any of those references goes stale - and, since a docstring
+citing a file is also a claim, if any repo-relative path mentioned in `src/`, `bench/`, `scripts/` or
+`docs/` does not resolve.
 
 **The in-process guard is defence in depth, not the boundary.** The harness and the candidate share
 one interpreter, so a determined program can interfere with its own bookkeeping. The container is the
@@ -298,18 +325,28 @@ Honest limits, in rough order of how much they constrain what the numbers mean.
   at the bottom. Same for the generator's noise level. Both sweeps are a script with a committed
   artifact - `uv run python bench/bench_calibration.py --check`, `bench/results/calibration.json` -
   and the numbers are in [ADR 0003](docs/adr/0003-mutation-operator-generator.md), not in prose.
-- **2 of 30 start programs are behaviour-preserving**, so every strategy solves them for free. The
-  share is measured and bounded rather than assumed away
+- **0 of the 18 reported tasks start behaviour-preserving**, so no reported solve rate contains a
+  free win. 2 of the 30 tasks in the whole suite do, and both landed in the 12-task trace split. The
+  earlier version of this bullet said "2 of 30", which invited discounting 2/18 = 11.1% from every
+  rate - exactly best-of-N's headline number, and a false conclusion. The classification is
+  script-produced now, on the reported split, and printed in
+  [docs/EXPERIMENTS.md](docs/EXPERIMENTS.md)
   ([`tasks/validate.py`](src/verifier_guided_search/tasks/validate.py),
-  [`test_suite_quality.py`](tests/integration/test_suite_quality.py)); it adds the same constant to
-  every strategy and does not affect the comparison.
+  [`test_suite_quality.py`](tests/integration/test_suite_quality.py)).
+- **1 of the 18 reported tasks already fools its own visible suite at depth 0.**
+  `balanced_brackets/01` starts passing every visible test and failing a hidden one, so it
+  contributes a false pass to every strategy at every budget with no search at all. That is not a
+  defect - it is the verifier-overfitting case arriving for free - but it is most of why the
+  false-pass rate looks constant, and it is reported rather than left to be inferred.
 - **18 tasks is a small sample.** Most gaps between adjacent strategies sit inside their confidence
   intervals. The beam-versus-best-of-N gap does not; the beam-versus-MCTS gap does. The full
   150-task suite exists (`vgs tasks`) but takes far longer than the "minutes on a CPU" this repo
   commits to, so the reported configuration is the small one.
-- **The value model does not help the search**, as measured. A calibrated or blended value signal
-  (model probability mixed with visible pass fraction), and a value model trained on more than 169
-  rows, are the obvious next steps and are not implemented.
+- **The value model does not help the search**, as measured (66.7% without it against 61.1% with it,
+  MCTS at budget 16 on the reported split). A calibrated or blended value signal (model probability
+  mixed with visible pass fraction), and a value model trained on more than 57 rows, are the obvious
+  next steps and are not implemented. [ADR 0004](docs/adr/0004-value-model-does-not-help-search.md)
+  says why the default is nevertheless left on.
 - **Tokens are pro-rated, not measured per candidate.** A generator call produces `k` candidates, so
   a prefix's token count is estimated by the share of evaluations it contains. The headline compute
   axis is therefore verifier calls; token and sandbox-second spend are reported alongside.
@@ -323,6 +360,14 @@ Honest limits, in rough order of how much they constrain what the numbers mean.
 - **Registry integrity is a content hash, not a signature.** It detects corruption and any edit that
   did not also rename the file; it does not stop someone who can rewrite both the artifact and the
   index.
+- **The coverage figure does not cover the child harness.** `sandbox/child.py` is copied out and run
+  by a separate interpreter as `python -I -S -B`, and `-S` skips `site`, so coverage's subprocess
+  startup hook never runs - instrumenting it would mean handing the sandboxed interpreter its
+  environment and its site-packages back, which is the hardening the file exists for. The escape
+  suite and the sandbox tests exercise it hard and contribute nothing to the number, so the coverage
+  table's figure for that one file (the lowest in the repo) understates it while the repo-wide figure
+  slightly overstates the rest. The controls in that file are measured by the escape suite instead,
+  which is a behavioural check rather than a line count.
 
 ## Licence
 

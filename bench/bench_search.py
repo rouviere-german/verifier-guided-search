@@ -17,7 +17,10 @@ What it measures, in the order the spec lists it:
 2. candidates needed to reach the target hidden solve rate, per strategy;
 3. verifier false-pass rate (visible pass, hidden fail) per strategy;
 4. value model held-out AUC and ECE, trained on a *disjoint* set of tasks;
-5. ablations over ``c_puct``, ``k`` and value model on/off;
+5. ablations over ``c_puct``, ``k`` and value model on/off - plus the value-model on/off
+   comparison repeated for MCTS on the *whole reported split at the reported budget*, because the
+   ablations run on a 12-task subset at budget 8 and the README's claim that the model does not help
+   is about the headline configuration;
 6. the sandbox escape suite;
 7. what the reported tasks *start* from - how many are already correct (a free win for every
    strategy) and how many already satisfy their visible suite with a wrong program (a false pass at
@@ -95,6 +98,9 @@ ABLATION_TASKS: Final = 12
 @dataclass(frozen=True, slots=True)
 class BenchOutput:
     results: SweepResults
+    #: MCTS over the same tasks and budgets with the value model off. The ablation table answers the
+    #: same question on a subset at a lower budget; this answers it where the headline lives.
+    value_model_off: SweepResults
     ablations: AblationResults
     trained: TrainedValueModel
     escapes: tuple[EscapeOutcome, ...]
@@ -109,6 +115,9 @@ class BenchOutput:
         return {
             "best_strategy_hidden_solve_rate": round(best.hidden_solve_rate, 4),
             "mcts_hidden_solve_rate": round(self.results.level("mcts", top).hidden_solve_rate, 4),
+            "mcts_hidden_solve_rate_value_model_off": round(
+                self.value_model_off.level("mcts", top).hidden_solve_rate, 4
+            ),
             "max_false_pass_rate": round(max(item.false_pass_rate for item in levels), 4),
             "value_model_holdout_auc": round(self.trained.metrics.auc, 4),
             "value_model_holdout_ece": round(self.trained.metrics.ece, 4),
@@ -127,6 +136,7 @@ class BenchOutput:
             "machine": machine(),
             "metrics": self.metrics(),
             "sweep": self.results.model_dump(mode="json"),
+            "sweep_value_model_off": self.value_model_off.model_dump(mode="json"),
             "ablations": self.ablations.model_dump(mode="json"),
             "value_model": {
                 "version": self.trained.version,
@@ -199,6 +209,19 @@ def run(*, quick: bool, workdir: Path, verbose: bool = True) -> BenchOutput:
     say("budget sweep ...")
     results = run_sweep(eval_suite, config, deps)
 
+    say("the same sweep for mcts with the value model off ...")
+    off_config = config.model_copy(update={"strategies": ("mcts",), "use_value_model": False})
+    value_model_off = run_sweep(
+        eval_suite,
+        off_config,
+        SweepDeps(sandbox=sandbox, generator=generator, progress=lambda text: say(f"  {text}")),
+    )
+    say(
+        f"  mcts at {levels[-1]}: "
+        f"{value_model_off.level('mcts', levels[-1]).hidden_solve_rate:.3f} without the model "
+        f"vs {results.level('mcts', levels[-1]).hidden_solve_rate:.3f} with it"
+    )
+
     say("ablations ...")
     ablation_suite = eval_suite.subset(per_family=1)
     if len(ablation_suite) > ABLATION_TASKS:
@@ -215,6 +238,7 @@ def run(*, quick: bool, workdir: Path, verbose: bool = True) -> BenchOutput:
 
     return BenchOutput(
         results=results,
+        value_model_off=value_model_off,
         ablations=ablations,
         trained=trained,
         escapes=escapes,
@@ -243,6 +267,7 @@ def check_thresholds(metrics: dict[str, float]) -> list[str]:
 def document(output: BenchOutput, command: str) -> str:
     return render_experiments_document(
         output.results,
+        value_model_off=output.value_model_off,
         ablations=output.ablations,
         trained=output.trained,
         escape=list(output.escapes),

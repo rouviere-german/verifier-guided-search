@@ -9,6 +9,9 @@
   "mcts_hidden_solve_rate": {
     "min": 0.25
   },
+  "mcts_hidden_solve_rate_value_model_off": {
+    "min": 0.25
+  },
   "max_false_pass_rate": {
     "max": 0.6
   },

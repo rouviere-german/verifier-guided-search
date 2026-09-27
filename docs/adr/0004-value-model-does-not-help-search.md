@@ -21,6 +21,12 @@ Then the ablation was run. At budget 8 the hidden solve rate is identical with t
 it. At budget 16, MCTS scores **61.1% with the model and 66.7% without it**. The model does not help;
 if anything it hurts slightly.
 
+Both of those numbers are measured on the reported split at the reported budget and are rows in
+`bench/results/search.json`: the on/off ablation under `ablations`, and the budget-16 comparison as a
+whole second sweep under `sweep_value_model_off`, with `mcts_hidden_solve_rate_value_model_off` in the
+threshold-checked metrics. It was previously only the ablation that was committed, which left the
+sentence above resting on a run nobody could reproduce from the repo.
+
 ## Decision
 
 **Keep the model, report the negative result prominently, and do not paper over it.** Specifically:
@@ -76,8 +82,9 @@ real, and because the fix is known rather than hypothetical.
   An ECE of 0.081 is not bad overall but says nothing about resolution inside the negative class;
 - **train a ranker instead of a classifier**, with a pairwise loss over sibling candidates, which is
   the objective the search actually wants;
-- **more data**: 169 trace rows over 12 tasks is small, and a model this saturated is partly a symptom
-  of learning from few positives.
+- **more data**: 57 training rows and 24 held-out rows, deduplicated by (task, program) from the
+  traces of 12 tasks, is small, and a model this saturated is partly a symptom of learning from few
+  positives.
 
 Each of those changes the reported numbers, so each needs the full bench re-run rather than a
 plausible-sounding paragraph.
